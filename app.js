@@ -5,6 +5,7 @@ const configured = SUPABASE_URL.startsWith('https://') && !SUPABASE_URL.includes
 const db = configured ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 const $ = function(id){ return document.getElementById(id); };
 let assets=[], loans=[], session=null, admin=false, borrowedAssetIds=new Set(), modalMode='', modalId=null;
+
 const today=function(){
   const d=new Date();
   const y=d.getFullYear();
@@ -12,51 +13,61 @@ const today=function(){
   const day=String(d.getDate()).padStart(2,'0');
   return y+'-'+m+'-'+day;
 };
+
 const dateText=function(d){
   if(!d) return '—';
   return String(d).replaceAll('-','.');
 };
+
 const safe=function(v){
   if(v===null || v===undefined) return '';
   return String(v).replace(/[&<>"']/g, function(c){
     return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
   });
 };
+
 const assetFor=function(id){
   for(let i=0; i<assets.length; i++){
     if(assets[i].id===id) return assets[i];
   }
   return null;
 };
+
 const activeLoanFor=function(id){
   for(let i=0; i<loans.length; i++){
     if(loans[i].asset_id===id && !loans[i].returned_at) return loans[i];
   }
   return null;
 };
+
 const isAdmin=function(){ return admin; };
+
 const statusFor=function(a){
   if(borrowedAssetIds.has(a.id)) return 'borrowed';
   if(activeLoanFor(a.id)) return 'borrowed';
   if(a.status==='maintenance') return 'maintenance';
   return 'available';
 };
+
 const statusLabel=function(s){
   if(s==='available') return '사용 가능';
   if(s==='borrowed') return '대여 중';
   if(s==='maintenance') return '수리 중';
   return s;
 };
+
 function toast(msg){
   $('toast').textContent=msg;
   $('toast').classList.add('show');
   setTimeout(function(){ $('toast').classList.remove('show'); }, 2600);
 }
+
 function fmtName(id){
   const a=assetFor(id);
   if(a && a.name) return a.name;
   return id;
 }
+
 function setAdminUI(){
   $('loginBtn').classList.toggle('hidden', isAdmin());$('logoutBtn').classList.toggle('hidden', !isAdmin());
   const adminEls = document.querySelectorAll('.admin-only');
@@ -65,6 +76,7 @@ function setAdminUI(){
   }
   $('connection').textContent = db ? '공용 DB 연결' : '설정 필요';
 }
+
 async function refreshAdminState(){
   admin=false;
   if(db && session && session.user && !session.user.is_anonymous){
@@ -74,6 +86,7 @@ async function refreshAdminState(){
   }
   setAdminUI();
 }
+
 async function loadData(){
   if(!db){
     $('connection').textContent='Supabase 설정 필요';
@@ -106,6 +119,7 @@ async function loadData(){
     toast('데이터를 불러오지 못했습니다. Supabase 설정과 SQL 정책을 확인하세요.');
   }
 }
+
 function render(){
   renderMetrics();
   renderDashboard();
@@ -114,6 +128,7 @@ function render(){
   renderHistory();
   setAdminUI();
 }
+
 function renderMetrics(){
   const active=loans.filter(function(l){ return !l.returned_at; });
   const overdue=active.filter(function(l){
@@ -132,6 +147,7 @@ function renderMetrics(){
   }
   $('metrics').innerHTML=html;
 }
+
 function renderDashboard(){
   const active=loans.filter(function(l){ return !l.returned_at; }).sort(function(a,b){
     const da = a.due_date ? a.due_date : '';
@@ -170,6 +186,7 @@ function renderDashboard(){
   }
   $('recentActivity').innerHTML = recentHtml || '<div class="empty">아직 활동이 없습니다.</div>';
 }
+
 function renderInventory(){
   const q=$('assetSearch').value.trim().toLowerCase();
   const f=$('assetFilter').value;
@@ -202,5 +219,34 @@ function renderInventory(){
     $('inventoryRows').innerHTML='<div class="empty">검색 결과가 없습니다.</div>';
   }
 }
+
 function canManageLoan(l){ return true; }
-function renderLoans
+
+function renderLoans(){
+  const q=$('loanSearch').value.trim().toLowerCase();
+  const f=$('loanFilter').value;
+  const list=loans.filter(function(l){
+    let matchFilter=false;
+    if(f==='all') matchFilter=true;
+    else if(f==='active') matchFilter=!l.returned_at;
+    else if(f==='returned') matchFilter=!!l.returned_at;
+    const textTarget = [l.asset_id, l.borrower_name, fmtName(l.asset_id)].join(' ').toLowerCase();
+    return matchFilter && textTarget.includes(q);
+  });
+  
+  if(list.length>0){
+    let loanHtml='';
+    for(let i=0; i<list.length; i++){
+      const l = list[i];
+      let action = '';
+      if(canManageLoan(l)){
+        action += '<button class="text-btn" data-edit-loan="' + l.id + '">수정</button>';
+        if(!l.returned_at){
+          action += '<button class="text-btn" data-return="' + l.id + '">반납 처리</button>';
+        }else{
+          action += '<span class="status available">완료</span>';
+        }
+      }else{
+        action = '—';
+      }
+      loanHtml += '<tr><td><b>' + safe(fmtName(l.asset_id)) + '</b><div class="asset-id">' + safe(l.asset_id) + '</div></td><td>' + safe(l.borrower_name
