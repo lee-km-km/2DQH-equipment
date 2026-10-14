@@ -28,16 +28,67 @@ function setAdminUI(){ $('loginBtn').classList.toggle('hidden',isAdmin());$('log
 async function refreshAdminState(){admin=false;if(db&&session?.user&&!session.user.is_anonymous){const {data,error}=await db.rpc('is_admin');if(error)console.error('관리자 권한 확인 실패:',error);admin=!error&&data===true;}setAdminUI();}
 async function loadData(){if(!db){$('connection').textContent='Supabase 설정 필요';render();return}try{const [{data:a,error:ae},{data:l,error:le},{data:av,error:ave}]=await Promise.all([db.from('assets').select('*').order('name'),db.from('loans').select('*').order('borrowed_at',{ascending:false}),db.rpc('get_asset_availability')]);if(ae)throw ae;if(le)throw le;if(ave)throw ave;assets=a?a:[];loans=l?l:[];const avList=av?av:[];borrowedAssetIds=new Set(avList.filter(x=>x.is_borrowed).map(x=>x.asset_id));$('connection').textContent='공용 DB 연결됨';render()}catch(e){$('connection').textContent='DB 오류';console.error(e);toast('데이터를 불러오지 못했습니다. Supabase 설정과 SQL 정책을 확인하세요.')}}
 function render(){renderMetrics();renderDashboard();renderInventory();renderLoans();renderHistory();setAdminUI()}
-function renderMetrics(){const active=loans.filter(l=>!l.returned_at);const overdue=active.filter(l=>{if(!l.due_date) return false;return l.due_date < today();});const items=[['전체 비품',assets.length,'등록된 품목'],['대여 중',active.length,'현재 사용 중'],['사용 가능',assets.filter(a=>statusFor(a)==='available').length,'바로 대여 가능'],['반납 기한 초과',overdue.length,'확인이 필요한 품목']];$('metrics').innerHTML=items.map(x=>`<div class="metric"><div class="label">${x[0]}</div><div class="value">${x[1]}</div><div class="foot">${x[2]}</div></div>`).join('')}
-function renderDashboard(){const active=loans.filter(l=>!l.returned_at).sort((a,b)=>{const da=a.due_date?a.due_date:'';const dbDate=b.due_date?b.due_date:'';return da.localeCompare(dbDate);});$('dashboardLoans').innerHTML=active.length?`<table><thead><tr><th>비품</th><th>대여자</th><th>반납 예정</th><th>상태</th></tr></thead><tbody>${active.slice(0,7).map(l=>{const isOverdue = l.due_date && l.due_date < today();return `<tr><td><b>${safe(fmtName(l.asset_id))}</b><div class="asset-id">${safe(l.asset_id)}</div></td><td>${safe(l.borrower_name)}</td><td>${dateText(l.due_date)}</td><td><span class="status ${isOverdue?'borrowed':'available'}">${isOverdue?'기한 초과':'대여 중'}</span></td></tr>`}).join('')}</tbody></table>`:'<div class="empty">현재 대여 중인 비품이 없습니다.</div>';
-const getTime=item=>{if(item.updated_at) return item.updated_at;if(item.borrowed_at) return item.borrowed_at;return '';};
-const recent=[...loans].sort((a,b)=>getTime(b).localeCompare(getTime(a))).slice(0,5);
-$('recentActivity').innerHTML=recent.map(l=>`<div class="activity-item"><b>${safe(l.borrower_name)}</b> · ${safe(fmtName(l.asset_id))}<small>${dateText(l.returned_at?l.returned_at:l.borrowed_at)} · ${l.returned_at?'반납 완료':'대여 등록'}</small></div>`).join('')||'<div class="empty">아직 활동이 없습니다.</div>'}
-function renderInventory(){const q=$('assetSearch').value.trim().toLowerCase();const f=$('assetFilter').value;const list=assets.filter(a=>{const matchFilter=(f==='all'?true:statusFor(a)===f);const textTarget=[a.id,a.name,a.category,a.location,a.note].join(' ').toLowerCase();const matchSearch=textTarget.includes(q);return matchFilter&&matchSearch;});$('inventoryRows').innerHTML=list.length?`<table><thead><tr><th>비품명 / 식별번호</th><th>분류</th><th>보관 위치</th><th>상태</th><th>현재 대여자</th><th>작업</th></tr></thead><tbody>${list.map(a=>{const l=activeLoanFor(a.id);const st=statusFor(a);const bName=l&&l.borrower_name?l.borrower_name:'—';const loc=a.location?a.location:'—';return `<tr><td><b>${safe(a.name)}</b><div class="asset-id">${safe(a.id)}</div></td><td>${safe(a.category)}</td><td>${safe(loc)}</td><td><span class="status ${st}">${statusLabel(st)}</span></td><td>${safe(bName)}</td><td>${st==='available'?`<button class="text-btn" data-borrow="${safe(a.id)}">대여</button>`:''}${isAdmin()?`<button class="text-btn" data-edit="${safe(a.id)}">수정</button>`:''}</td></tr>`}).join('')}</tbody></table>`:'<div class="empty">검색 결과가 없습니다.</div>'}
-function canManageLoan(l){return true;}
-function renderLoans(){const q=$('loanSearch').value.trim().toLowerCase();const f=$('loanFilter').value;const list=loans.filter(l=>{let matchFilter=false;if(f==='all') matchFilter=true;else if(f==='active') matchFilter=!l.returned_at;else if(f==='returned') matchFilter=!!l.returned_at;const textTarget=[l.asset_id,l.borrower_name,fmtName(l.asset_id)].join(' ').toLowerCase();return matchFilter&&textTarget.includes(q);});$('loanRows').innerHTML=list.length?`<table><thead><tr><th>비품</th><th>대여자</th><th>대여 시작일</th><th>반납 예정일</th><th>실제 반납일</th><th>처리</th></tr></thead><tbody>${list.map(l=>`<tr><td><b>${safe(fmtName(l.asset_id))}</b><div class="asset-id">${safe(l.asset_id)}</div></td><td>${safe(l.borrower_name)}</td><td>${dateText(l.borrowed_at)}</td><td>${dateText(l.due_date)}</td><td>${dateText(l.returned_at)}</td><td>${canManageLoan(l)?`<button class="text-btn" data-edit-loan="${l.id}">수정</button>${!l.returned_at?`<button class="text-btn" data-return="${l.id}">반납 처리</button>`:'<span class="status available">완료</span>'}`:'—'}</td></tr>`).join('')}</tbody></table>`:'<div class="empty">표시할 기록이 없습니다.</div>'}
-function renderHistory(){const q=$('historySearch').value.trim().toLowerCase();const list=[...loans].filter(l=>[l.asset_id,l.borrower_name,fmtName(l.asset_id)].join(' ').toLowerCase().includes(q));$('historyRows').innerHTML=list.length?`<div class="table-wrap"><table><thead><tr><th>비품 / 식별번호</th><th>대여자</th><th>시작일</th><th>예정 반납일</th><th>실제 반납일</th><th>상태</th></tr></thead><tbody>${list.map(l=>`<tr><td><b>${safe(fmtName(l.asset_id))}</b><div class="asset-id">${safe(l.asset_id)}</div></td><td>${safe(l.borrower_name)}</td><td>${dateText(l.borrowed_at)}</td><td>${dateText(l.due_date)}</td><td>${dateText(l.returned_at)}</td><td><span class="status ${l.returned_at?'available':'borrowed'}">${l.returned_at?'반납 완료':'대여 중'}</span></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">검색 결과가 없습니다.</div>'}
-function openModal(mode,id=null){modalMode=mode;modalId=id;$('modalBackdrop').classList.add('open');const a=id?assetFor(id):null;$('modalTitle').textContent=mode==='asset'?(a?'비품 정보 수정':'비품 등록'):mode==='borrow'?'대여 기록':mode==='return'?'반납 처리':mode==='editLoan'?'대여 기록 수정':'관리자 로그인';let html='';if(mode==='asset'){const aId=a&&a.id?a.id:nextAssetId();const aCat=a&&a.category?a.category:'';const aName=a&&a.name?a.name:'';const aLoc=a&&a.location?a.location:'';const aNote=a&&a.note?a.note:'';html=`<div class="form-grid"><label class="field">식별번호 *<input name="id" required value="${safe(aId)}" ${a?'readonly':''} placeholder="EQ-001"></label><label class="field">분류 *<input name="category" required value="${safe(aCat)}" placeholder="측정공구"></label><label class="field full">비품명 *<input name="name" required value="${safe(aName)}"></label><label class="field full">보관 위치<input name="location" value="${safe(aLoc)}" placeholder="분석실 캐비닛 A"></label><label class="field">상태<select name="status"><option value="available" ${!a||a.status==='available'?'selected':''}>사용 가능</option><option value="maintenance" ${a&&a.status==='maintenance'?'selected':''}>수리 중</option></select></label><label class="field">비고<input name="note" value="${safe(aNote)}"></label></div>`}else if(mode==='borrow'){const avail=assets.filter(x=>statusFor(x)==='available');html=`<div class="form-grid"><label class="field full">비품 *<select name="asset_id" required>${avail.map(x=>`<option value="${safe(x.id)}" ${x.id===id?'selected':''}>${safe(x.id)} ·${safe(x.name)}</option>`).join('')}</select></label><label class="field full">대여자 이름 *<input name="borrower_name" required maxlength="100" placeholder="이름 직접 입력"></label><label class="field">대여 시작일 *<input name="borrowed_at" type="date" required value="${today()}"></label><label class="field">반납 예정일 *<input name="due_date" type="date" required min="${today()}" value="${today()}"></label><label class="field full">사용 목적 / 메모<textarea name="memo" rows="2" maxlength="500" placeholder="선택 입력"></textarea><small>대여 기록은 공용 목록에 저장됩니다. 이름 입력은 본인 확인 수단이 아닙니다.</small></label></div>${avail.length?'':'<p>현재 대여 가능한 비품이 없습니다.</p>'}`}else if(mode==='editLoan'){const l=loans.find(x=>x.id===id);const lName=l&&l.borrower_name?l.borrower_name:'';const lDue=l&&l.due_date?l.due_date:today();const lMemo=l&&l.memo?l.memo:'';const lStart=l&&l.borrowed_at?l.borrowed_at:today();html=`<p><b>${safe(fmtName(l?.asset_id))}</b> · ${safe(lName)}</p><div class="form-grid"><label class="field full">대여자 이름 *<input name="borrower_name" required maxlength="100" value="${safe(lName)}"></label><label class="field full">반납 예정일 *<input name="due_date" type="date" required min="${lStart}" value="${safe(lDue)}"></label><label class="field full">메모<textarea name="memo" rows="2" maxlength="500">${safe(lMemo)}</textarea></label></div>`}else if(mode==='return'){const l=loans.find(x=>x.id===id);const lStart=l&&l.borrowed_at?l.borrowed_at:'';html=`<p><b>${safe(fmtName(l?.asset_id))}</b> · ${safe(l?.borrower_name)}</p><div class="form-grid"><label class="field full">실제 반납일 *<input name="returned_at" type="date" required value="${today()}" min="${lStart}"></label><label class="field full">반납 메모<textarea name="return_memo" rows="2" maxlength="500" placeholder="파손·분실 여부 등"></textarea></label></div>`}else{html=`<label class="field">관리자 이메일<input name="email" type="email" required autocomplete="username"></label><label class="field" style="margin-top:12px">비밀번호<input name="password" type="password" required autocomplete="current-password"></label><p class="sub" style="margin-top:12px">Supabase에서 미리 생성한 관리자 계정만 로그인할 수 있도록 회원가입은 꺼두세요.</p>`}$('modalBody').innerHTML=html;const hasAvail = assets.some(x=>statusFor(x)==='available');$('saveModal').textContent=mode==='borrow'?'대여 등록':mode==='return'?'반납 완료':mode==='login'?'로그인':mode==='editLoan'?'수정 저장':'저장';$('saveModal').disabled=mode==='borrow'&&!hasAvail}
-function closeModal(){$('modalBackdrop').classList.remove('open');$('modalForm').reset()}
-function nextAssetId(){let n=1;while(assets.some(a=>a.id===`EQ-${String(n).padStart(3,'0')}`))n++;return `EQ-${String(n).padStart(3,'0')}`}
-async function submitModal(e){e.preventDefault();if(!db)return toast('먼저 Supabase 설정을 완료하세요.');const fd=new FormData(e.target);try{if(modalMode==='login'){const {data,error}=await db.auth.signInWithPassword({email:fd.get('email'),password:fd.get('password')});if(error)throw error;session=data.session;await refreshAdminState();if(!isAdmin()){await db.auth.signOut();session=null;await db.auth.signInAnonymously();throw new Error('이 계정에는 관리자 권한이 없습니다.')}closeModal();toast('관리자로 로그인했습니다.');await loadData();return}if(modalMode==='asset'){if(!isAdmin())throw new Error('관리자 로그인 후 이용할 수 있습니다.');const obj={id:fd.get('id').trim(),name:fd.get('name').trim(),category:fd.get('category').trim(),location:fd.get('location').trim(),status:fd.get('status'),note:fd.get('note').trim()};const {error}=await db.from('assets').upsert(obj);if(error)throw error;toast('비품 정보를 저장했습니다.')}else if(modalMode==='borrow'){if(!session?.user?.id)throw new Error('사용자 세션을 확인할 수 없습니다. 새로고침해 주세요.');const obj={asset_id:fd.get('asset_id'),borrower_name:fd.get('borrower_name').trim(),borrowed_at:fd.get('borrowed_at'),due_date:fd.get('due_date'),memo:fd.get('memo').trim(),user_id:session.user.id};if(!obj.borrower_name)throw new Error('대여자 이름을 입력하세요.');if(obj.due_date<obj.borrowed_at)throw new Error('반납 예정일은 대여 시작일보다 빠를 수 없습니다.');const {error}=await db.from('loans').insert(
+function renderMetrics(){
+  const active=loans.filter(l=>!l.returned_at);
+  const overdue=active.filter(l=>{if(!l.due_date) return false;return l.due_date < today();});
+  const items=[
+    ['전체 비품', assets.length, '등록된 품목'],
+    ['대여 중', active.length, '현재 사용 중'],
+    ['사용 가능', assets.filter(a=>statusFor(a)==='available').length, '바로 대여 가능'],
+    ['반납 기한 초과', overdue.length, '확인이 필요한 품목']
+  ];
+  $('metrics').innerHTML=items.map(x=>'<div class="metric"><div class="label">'+x[0]+'</div><div class="value">'+x[1]+'</div><div class="foot">'+x[2]+'</div></div>').join('');
+}
+function renderDashboard(){
+  const active=loans.filter(l=>!l.returned_at).sort((a,b)=>{
+    const da=a.due_date?a.due_date:'';
+    const dbDate=b.due_date?b.due_date:'';
+    return da.localeCompare(dbDate);
+  });
+  
+  if(active.length > 0) {
+    let rowsHtml = '';
+    for(let i=0; i<Math.min(active.length, 7); i++) {
+      const l = active[i];
+      const isOverdue = l.due_date && l.due_date < today();
+      rowsHtml += '<tr><td><b>' + safe(fmtName(l.asset_id)) + '</b><div class="asset-id">' + safe(l.asset_id) + '</div></td><td>' + safe(l.borrower_name) + '</td><td>' + dateText(l.due_date) + '</td><td><span class="status ' + (isOverdue ? 'borrowed' : 'available') + '">' + (isOverdue ? '기한 초과' : '대여 중') + '</span></td></tr>';
+    }
+    $('dashboardLoans').innerHTML = '<table><thead><tr><th>비품</th><th>대여자</th><th>반납 예정</th><th>상태</th></tr></thead><tbody>' + rowsHtml + '</tbody></table>';
+  } else {
+    $('dashboardLoans').innerHTML = '<div class="empty">현재 대여 중인 비품이 없습니다.</div>';
+  }
+
+  const getTime=item=>{if(item.updated_at) return item.updated_at;if(item.borrowed_at) return item.borrowed_at;return '';};
+  const recent=[...loans].sort((a,b)=>getTime(b).localeCompare(getTime(a))).slice(0,5);
+  
+  let recentHtml = '';
+  for(let i=0; i<recent.length; i++) {
+    const l = recent[i];
+    recentHtml += '<div class="activity-item"><b>' + safe(l.borrower_name) + '</b> · ' + safe(fmtName(l.asset_id)) + '<small>' + dateText(l.returned_at ? l.returned_at : l.borrowed_at) + ' · ' + (l.returned_at ? '반납 완료' : '대여 등록') + '</small></div>';
+  }
+  $('recentActivity').innerHTML = recentHtml || '<div class="empty">아직 활동이 없습니다.</div>';
+}
+function renderInventory(){
+  const q=$('assetSearch').value.trim().toLowerCase();
+  const f=$('assetFilter').value;
+  const list=assets.filter(a=>{
+    const matchFilter=(f==='all'?true:statusFor(a)===f);
+    const textTarget=[a.id,a.name,a.category,a.location,a.note].join(' ').toLowerCase();
+    const matchSearch=textTarget.includes(q);
+    return matchFilter&&matchSearch;
+  });
+  
+  if(list.length > 0) {
+    let listHtml = '';
+    for(let i=0; i<list.length; i++) {
+      const a = list[i];
+      const l = activeLoanFor(a.id);
+      const st = statusFor(a);
+      const bName = l && l.borrower_name ? l.borrower_name : '—';
+      const loc = a.location ? a.location : '—';
+      let actionBtn = '';
+      if(st === 'available') {
+        actionBtn += '<button class="text-btn" data-borrow="' + safe(a.id) + '">대여</button>';
+      }
+      if(isAdmin()) {
+        actionBtn += '<button class="text-btn" data-edit="' + safe(a.id) + '">수정
