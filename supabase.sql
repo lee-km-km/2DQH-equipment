@@ -1,4 +1,4 @@
--- LabStock database schema + access-control migration.
+-- LabStock database schema + access-control migration (Modified for Public Read & Return/Manage).
 -- Back up the database before running this script on an existing project.
 
 create table if not exists public.assets (
@@ -29,7 +29,6 @@ create table if not exists public.loans (
 -- Anonymous visitors receive a Supabase anonymous-auth session. They are authenticated
 -- users with a stable auth.uid(), but do not have administrator privileges by default.
 
-
 insert into public.assets(id,name,category,location,note) values
 ('EQ-001','디지털 멀티미터','측정공구','분석실 캐비닛 A','예시 데이터'),
 ('EQ-002','토크 드라이버 세트','공구','장비실 서랍 2','예시 데이터'),
@@ -59,10 +58,9 @@ as $$
   );
 $$;
 revoke all on function public.is_admin() from public;
-grant execute on function public.is_admin() to authenticated;
+grant execute on function public.is_admin() to authenticated, anon;
 
 -- Availability-only endpoint: other users can know whether an item is borrowed
--- without being able to read the borrower's identity or private loan record.
 create or replace function public.get_asset_availability()
 returns table(asset_id text, is_borrowed boolean)
 language sql
@@ -77,7 +75,7 @@ as $$
   from public.assets a;
 $$;
 revoke all on function public.get_asset_availability() from public;
-grant execute on function public.get_asset_availability() to authenticated;
+grant execute on function public.get_asset_availability() to authenticated, anon;
 
 alter table public.assets enable row level security;
 alter table public.loans enable row level security;
@@ -94,44 +92,45 @@ begin
   end loop;
 end $$;
 
--- No anonymous-role direct access to loans. All app users must have an auth session.
+-- Grant table-level access to both anon and authenticated users
 grant select on public.assets to anon, authenticated;
 grant insert, update, delete on public.assets to authenticated;
-grant select, insert, update, delete on public.loans to authenticated;
+
+-- 익명 사용자(anon)도 전체 대여 로그를 조회하고 대여/반납 처리(insert, update)를 할 수 있도록 권한 부여
+grant select, insert, update on public.loans to anon, authenticated;
+grant delete on public.loans to authenticated;
 
 create policy assets_public_read
 on public.assets for select to anon, authenticated
 using (true);
+
 create policy assets_admin_manage
 on public.assets for all to authenticated
 using ((select public.is_admin()))
 with check ((select public.is_admin()));
 
-create policy loans_read_own_or_admin
-on public.loans for select to authenticated
-using (user_id = (select auth.uid()) or (select public.is_admin()));
+-- [수정] 누구나(anon, authenticated) 전체 대여 기록을 볼 수 있도록 개방
+create policy loans_read_public
+on public.loans for select to anon, authenticated
+using (true);
 
-create policy loans_insert_own_or_admin
-on public.loans for insert to authenticated
-with check (
-  (user_id = (select auth.uid()) and returned_at is null)
-  or (select public.is_admin())
-);
+-- [수정] 누구나(anon, authenticated) 대여(Insert)를 할 수 있도록 개방
+create policy loans_insert_public
+on public.loans for insert to anon, authenticated
+with check (true);
 
-create policy loans_update_own_or_admin
-on public.loans for update to authenticated
-using (user_id = (select auth.uid()) or (select public.is_admin()))
-with check (user_id = (select auth.uid()) or (select public.is_admin()));
+-- [수정] 누구나(anon, authenticated) 대여 기록 수정 및 반납 처리를 할 수 있도록 개방
+create policy loans_update_public
+on public.loans for update to anon, authenticated
+using (true)
+with check (true);
 
 create policy loans_delete_admin_only
 on public.loans for delete to authenticated
 using ((select public.is_admin()));
 
--- The identity sequence may need explicit privileges for inserts through PostgREST.
-grant usage, select on sequence public.loans_id_seq to authenticated;
-
--- Existing loans without user_id remain visible to administrators only.
--- Do not assign them to a user unless you can verify who originally borrowed them.
+-- The identity sequence may need explicit privileges for inserts through PostgREST (anon 포함).
+grant usage, select on sequence public.loans_id_seq to anon, authenticated;
 
 -- Prevent two concurrent active loans for the same item.
 create or replace function public.prevent_duplicate_active_loan()
