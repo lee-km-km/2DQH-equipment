@@ -35,5 +35,27 @@ document.querySelectorAll('[data-view]').forEach(b=>b.addEventListener('click',(
 $('loginBtn').onclick=()=>openModal('login');$('logoutBtn').onclick=async()=>{if(!db)return;await db.auth.signOut();session=null;admin=false;const {data,error}=await db.auth.signInAnonymously();if(error){console.error(error);toast('로그아웃 후 익명 세션을 만들지 못했습니다.')}else session=data.session;setAdminUI();toast('관리자 로그아웃했습니다.');await loadData()};$('quickBorrow').onclick=()=>openModal('borrow');$('loanAdd').onclick=()=>openModal('borrow');$('addAsset').onclick=()=>openModal('asset');$('closeModal').onclick=closeModal;$('cancelModal').onclick=closeModal;$('modalBackdrop').addEventListener('click',e=>{if(e.target===$('modalBackdrop'))closeModal()});$('modalForm').addEventListener('submit',submitModal);$('exportCsv').onclick=csv;
 ['assetSearch','assetFilter','loanSearch','loanFilter','historySearch'].forEach(id=>$(id).addEventListener('input',render));document.addEventListener('click',e=>{const b=e.target.closest('[data-borrow],[data-edit],[data-edit-loan],[data-return]');if(!b)return;if(b.dataset.borrow)openModal('borrow',b.dataset.borrow);if(b.dataset.edit&&isAdmin())openModal('asset',b.dataset.edit);if(b.dataset.editLoan)openModal('editLoan',Number(b.dataset.editLoan));if(b.dataset.return)openModal('return',Number(b.dataset.return))});
 (async()=>{if(db){db.auth.onAuthStateChange((_event,s)=>{session=s;if(!s)admin=false;setAdminUI()});const {data,error}=await db.auth.getSession();if(error)console.error(error);session=data?.session||null;console.log('현재 Supabase 세션:', session);
-console.log('사용자 ID:', session?.user?.id);
-console.log('익명 사용자 여부:', session?.user?.is_anonymous);if(!session){const {data:anonData,error:anonError}=await db.auth.signInAnonymously();if(anonError){console.error(anonError);toast('익명 사용자 세션 생성 실패: Supabase에서 Anonymous Sign-Ins를 활성화하세요.')}else session=anonData.session;}await refreshAdminState()}setAdminUI();await loadData()})();
+session = data?.session || null;
+console.log("[Auth] 기존 세션:", session);
+if (!session) {
+  const { data: anonData, error: anonError } =
+    await db.auth.signInAnonymously();
+
+  console.log("[Auth] 익명 로그인 결과:", {
+    error: anonError,
+    user: anonData?.user,
+    sessionExists: !!anonData?.session
+  });
+
+  if (anonError) {
+    console.error("[Auth] 익명 로그인 실패:", anonError);
+    toast("익명 로그인 실패: " + anonError.message);
+  } else {
+    session = anonData.session;
+  }
+}
+console.log("[Auth] 최종 세션:", {
+  userId: session?.user?.id,
+  isAnonymous: session?.user?.is_anonymous,
+  accessTokenExists: !!session?.access_token
+});
