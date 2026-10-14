@@ -95,3 +95,155 @@ async function refreshAdminState(){
     if(res.error) console.error('관리자 권한 확인 실패:', res.error);
     admin = !res.error && res.data === true;
   }
+  setAdminUI();
+}
+
+async function loadData(){
+  if(!db){
+    $('connection').textContent = 'Supabase 설정 필요';
+    render();
+    return;
+  }
+  try{
+    const results = await Promise.all([
+      db.from('assets').select('*').order('name'),
+      db.from('loans').select('*').order('borrowed_at', {ascending: false}),
+      db.rpc('get_asset_availability')
+    ]);
+    if(results[0].error) throw results[0].error;
+    if(results[1].error) throw results[1].error;
+    if(results[2].error) throw results[2].error;
+    
+    assets = results[0].data || [];
+    loans = results[1].data || [];
+    const avList = results[2].data || [];
+    
+    borrowedAssetIds = new Set();
+    for(let i=0; i<avList.length; i++){
+      if(avList[i].is_borrowed) borrowedAssetIds.add(avList[i].asset_id);
+    }
+    $('connection').textContent = '공용 DB 연결됨';
+    render();
+  }catch(e){
+    $('connection').textContent = 'DB 오류';
+    console.error(e);
+    toast('데이터를 불러오지 못했습니다. Supabase 설정과 SQL 정책을 확인하세요.');
+  }
+}
+
+function render(){
+  renderMetrics();
+  renderDashboard();
+  renderInventory();
+  renderLoans();
+  renderHistory();
+  setAdminUI();
+}
+
+function renderMetrics(){
+  const active = loans.filter(function(l){ return !l.returned_at; });
+  const overdue = active.filter(function(l){
+    if(!l.due_date) return false;
+    return l.due_date < today();
+  });
+  const items = [
+    ['전체 비품', assets.length, '등록된 품목'],
+    ['대여 중', active.length, '현재 사용 중'],
+    ['사용 가능', assets.filter(function(a){ return statusFor(a) === 'available'; }).length, '바로 대여 가능'],
+    ['반납 기한 초과', overdue.length, '확인이 필요한 품목']
+  ];
+  let html = '';
+  for(let i=0; i<items.length; i++){
+    html += '<div class="metric"><div class="label">' + items[i][0] + '</div><div class="value">' + items[i][1] + '</div><div class="foot">' + items[i][2] + '</div></div>';
+  }
+  $('metrics').innerHTML = html;
+}
+
+function renderDashboard(){
+  const active = loans.filter(function(l){ return !l.returned_at; }).sort(function(a,b){
+    const da = a.due_date ? a.due_date : '';
+    const dbDate = b.due_date ? b.due_date : '';
+    return da.localeCompare(dbDate);
+  });
+  
+  if(active.length > 0){
+    let rowsHtml = '';
+    const limit = Math.min(active.length, 7);
+    for(let i=0; i<limit; i++){
+      const l = active[i];
+      const isOverdue = l.due_date && l.due_date < today();
+      rowsHtml += '<tr><td><b>' + safe(fmtName(l.asset_id)) + '</b><div class="asset-id">' + safe(l.asset_id) + '</div></td><td>' + safe(l.borrower_name) + '</td><td>' + dateText(l.due_date) + '</td><td><span class="status ' + (isOverdue ? 'borrowed' : 'available') + '">' + (isOverdue ? '기한 초과' : '대여 중') + '</span></td></tr>';
+    }
+    $('dashboardLoans').innerHTML = '<table><thead><tr><th>비품</th><th>대여자</th><th>반납 예정</th><th>상태</th></tr></thead><tbody>' + rowsHtml + '</tbody></table>';
+  } else {
+    $('dashboardLoans').innerHTML = '<div class="empty">현재 대여 중인 비품이 없습니다.</div>';
+  }
+
+  const getTime = function(item){
+    if(item.updated_at) return item.updated_at;
+    if(item.borrowed_at) return item.borrowed_at;
+    return '';
+  };
+  const recent = [].concat(loans).sort(function(a,b){
+    return getTime(b).localeCompare(getTime(a));
+  }).slice(0,5);
+  
+  let recentHtml = '';
+  for(let i=0; i<recent.length; i++){
+    const l = recent[i];
+    const targetDate = l.returned_at ? l.returned_at : l.borrowed_at;
+    const labelText = l.returned_at ? '반납 완료' : '대여 등록';
+    recentHtml += '<div class="activity-item"><b>' + safe(l.borrower_name) + '</b> · ' + safe(fmtName(l.asset_id)) + '<small>' + dateText(targetDate) + ' · ' + labelText + '</small></div>';
+  }
+  $('recentActivity').innerHTML = recentHtml || '<div class="empty">아직 활동이 없습니다.</div>';
+}
+
+function renderInventory(){
+  const q = $('assetSearch').value.trim().toLowerCase();
+  const f = $('assetFilter').value;
+  const list = assets.filter(function(a){
+    const matchFilter = (f === 'all' ? true : statusFor(a) === f);
+    const textTarget = [a.id, a.name, a.category, a.location, a.note].join(' ').toLowerCase();
+    const matchSearch = textTarget.includes(q);
+    return matchFilter && matchSearch;
+  });
+  
+  if(list.length > 0){
+    let listHtml = '';
+    for(let i=0; i<list.length; i++){
+      const a = list[i];
+      const l = activeLoanFor(a.id);
+      const st = statusFor(a);
+      const bName = l && l.borrower_name ? l.borrower_name : '—';
+      const loc = a.location ? a.location : '—';
+      let actionBtn = '';
+      if(st === 'available'){
+        actionBtn += '<button class="text-btn" data-borrow="' + safe(a.id) + '">대여</button>';
+      }
+      if(isAdmin()){
+        actionBtn += '<button class="text-btn" data-edit="' + safe(a.id) + '">수정</button>';
+      }
+      listHtml += '<tr><td><b>' + safe(a.name) + '</b><div class="asset-id">' + safe(a.id) + '</div></td><td>' + safe(a.category) + '</td><td>' + safe(loc) + '</td><td><span class="status ' + st + '">' + statusLabel(st) + '</span></td><td>' + safe(bName) + '</td><td>' + actionBtn + '</td></tr>';
+    }
+    $('inventoryRows').innerHTML = '<table><thead><tr><th>비품명 / 식별번호</th><th>분류</th><th>보관 위치</th><th>상태</th><th>현재 대여자</th><th>작업</th></tr></thead><tbody>' + listHtml + '</tbody></table>';
+  } else {
+    $('inventoryRows').innerHTML = '<div class="empty">검색 결과가 없습니다.</div>';
+  }
+}
+
+function canManageLoan(l){ return true; }
+
+function renderLoans(){
+  const q = $('loanSearch').value.trim().toLowerCase();
+  const f = $('loanFilter').value;
+  const list = loans.filter(function(l){
+    let matchFilter = false;
+    if(f === 'all') matchFilter = true;
+    else if(f === 'active') matchFilter = !l.returned_at;
+    else if(f === 'returned') matchFilter = !!l.returned_at;
+    const textTarget = [l.asset_id, l.borrower_name, fmtName(l.asset_id)].join(' ').toLowerCase();
+    return matchFilter && textTarget.includes(q);
+  });
+  
+  if(list.length > 0){
+    let loanHtml = '';
