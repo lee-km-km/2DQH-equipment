@@ -249,4 +249,78 @@ function renderLoans(){
       }else{
         action = '—';
       }
-      loanHtml += '<tr><td><b>' + safe(fmtName(l.asset_id)) + '</b><div class="asset-id">' + safe(l.asset_id) + '</div></td><td>' + safe(l.borrower_name
+      loanHtml += '<tr><td><b>' + safe(fmtName(l.asset_id)) + '</b><div class="asset-id">' + safe(l.asset_id) + '</div></td><td>' + safe(l.borrower_name) + '</td><td>' + dateText(l.borrowed_at) + '</td><td>' + dateText(l.due_date) + '</td><td>' + dateText(l.returned_at) + '</td><td>' + action + '</td></tr>';
+    }
+    $('loanRows').innerHTML = '<table><thead><tr><th>비품</th><th>대여자</th><th>대여 시작일</th><th>반납 예정일</th><th>실제 반납일</th><th>처리</th></tr></thead><tbody>' + loanHtml + '</tbody></table>';
+  }else{
+    $('loanRows').innerHTML='<div class="empty">표시할 기록이 없습니다.</div>';
+  }
+}
+
+function renderHistory(){
+  const q=$('historySearch').value.trim().toLowerCase();
+  const list=loans.filter(function(l){
+    return [l.asset_id, l.borrower_name, fmtName(l.asset_id)].join(' ').toLowerCase().includes(q);
+  });
+  
+  if(list.length>0){
+    let histHtml='';
+    for(let i=0; i<list.length; i++){
+      const l = list[i];
+      const statClass = l.returned_at ? 'available' : 'borrowed';
+      const statText = l.returned_at ? '반납 완료' : '대여 중';
+      histHtml += '<tr><td><b>' + safe(fmtName(l.asset_id)) + '</b><div class="asset-id">' + safe(l.asset_id) + '</div></td><td>' + safe(l.borrower_name) + '</td><td>' + dateText(l.borrowed_at) + '</td><td>' + dateText(l.due_date) + '</td><td>' + dateText(l.returned_at) + '</td><td><span class="status ' + statClass + '">' + statText + '</span></td></tr>';
+    }
+    $('historyRows').innerHTML = '<div class="table-wrap"><table><thead><tr><th>비품 / 식별번호</th><th>대여자</th><th>시작일</th><th>예정 반납일</th><th>실제 반납일</th><th>상태</th></tr></thead><tbody>' + histHtml + '</tbody></table></div>';
+  }else{
+    $('historyRows').innerHTML='<div class="empty">검색 결과가 없습니다.</div>';
+  }
+}
+
+function openModal(mode, id){
+  if(id===undefined) id = null;
+  modalMode = mode;
+  modalId = id;
+  $('modalBackdrop').classList.add('open');
+  const a = id ? assetFor(id) : null;
+  
+  let titleText = '관리자 로그인';
+  if(mode==='asset') titleText = a ? '비품 정보 수정' : '비품 등록';
+  else if(mode==='borrow') titleText = '대여 기록';
+  else if(mode==='return') titleText = '반납 처리';
+  else if(mode==='editLoan') titleText = '대여 기록 수정';
+  $('modalTitle').textContent = titleText;
+
+  let html='';
+  if(mode==='asset'){
+    const aId = a && a.id ? a.id : nextAssetId();
+    const aCat = a && a.category ? a.category : '';
+    const aName = a && a.name ? a.name : '';
+    const aLoc = a && a.location ? a.location : '';
+    const aNote = a && a.note ? a.note : '';
+    const isReadonly = a ? 'readonly' : '';
+    const selAvail = (!a || a.status==='available') ? 'selected' : '';
+    const selMaint = (a && a.status==='maintenance') ? 'selected' : '';
+    
+    html = '<div class="form-grid">' +
+           '<label class="field">식별번호 *<input name="id" required value="' + safe(aId) + '" ' + isReadonly + ' placeholder="EQ-001"></label>' +
+           '<label class="field">분류 *<input name="category" required value="' + safe(aCat) + '" placeholder="측정공구"></label>' +
+           '<label class="field full">비품명 *<input name="name" required value="' + safe(aName) + '"></label>' +
+           '<label class="field full">보관 위치<input name="location" value="' + safe(aLoc) + '" placeholder="분석실 캐비닛 A"></label>' +
+           '<label class="field">상태<select name="status"><option value="available" ' + selAvail + '>사용 가능</option><option value="maintenance" ' + selMaint + '>수리 중</option></select></label>' +
+           '<label class="field">비고<input name="note" value="' + safe(aNote) + '"></label>' +
+           '</div>';
+  } else if(mode==='borrow'){
+    const avail = assets.filter(function(x){ return statusFor(x)==='available'; });
+    let optHtml = '';
+    for(let i=0; i<avail.length; i++){
+      const x = avail[i];
+      const isSel = (x.id===id) ? 'selected' : '';
+      optHtml += '<option value="' + safe(x.id) + '" ' + isSel + '>' + safe(x.id) + ' · ' + safe(x.name) + '</option>';
+    }
+    html = '<div class="form-grid">' +
+           '<label class="field full">비품 *<select name="asset_id" required>' + optHtml + '</select></label>' +
+           '<label class="field full">대여자 이름 *<input name="borrower_name" required maxlength="100" placeholder="이름 직접 입력"></label>' +
+           '<label class="field">대여 시작일 *<input name="borrowed_at" type="date" required value="' + today() + '"></label>' +
+           '<label class="field">반납 예정일 *<input name="due_date" type="date" required min="' + today() + '" value="' + today() + '"></label>' +
+           '<label class="field full">사용 목적 / 메모<textarea name="memo" rows="2" maxlength="500" placeholder="선택 입력"></textarea><small>대여 기록은 공용 목록에
