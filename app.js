@@ -304,3 +304,37 @@ function openModal(mode, id){
     titleText = '반납 처리';
   } else if(mode === 'editLoan'){
     titleText = '대여 기록 수정';
+  }
+  $('modalTitle').textContent = titleText;
+
+  let html = '';
+  let target = null;
+  for(let i = 0; i < loans.length; i++){
+    if(String(loans[i].id) === String(id)){
+      target = loans[i];
+      break;
+    }
+  }
+
+  let lName = '';
+  let lDue = today();
+  let lMemo = '';
+  let lStart = today();
+  let assetObjName = '';
+  if(target){
+    lName = target.borrower_name || '';
+    lDue = target.due_date || today();
+    lMemo = target.memo || '';
+    lStart = target.borrowed_at || today();
+    assetObjName = fmtName(target.asset_id);
+  }
+
+  if(mode === 'asset'){
+    const aId = a && a.id ? a.id : nextAssetId();
+    const aCat = a && a.category ? a.category : '';
+    const aName = a && a.name ? a.name : '';
+    const aLoc = a && a.location ? a.location : '';
+    const aNote = a && a.note ? a.note : '';
+    const isReadonly = a ? 'readonly' : '';
+    const selAvail = (!a || a.status === 'available') ? 'selected' : '';
+    const selMaint = (a && a.status === 'maintenance')
