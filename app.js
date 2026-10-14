@@ -307,7 +307,6 @@ function openModal(mode, id){
   }
   $('modalTitle').textContent = titleText;
 
-  let html = '';
   let target = null;
   for(let i = 0; i < loans.length; i++){
     if(String(loans[i].id) === String(id)){
@@ -322,6 +321,8 @@ function openModal(mode, id){
   const lStart = target ? (target.borrowed_at || today()) : today();
   const assetObjName = target ? fmtName(target.asset_id) : '';
 
+  let parts = [];
+
   if(mode === 'asset'){
     const aId = a && a.id ? a.id : nextAssetId();
     const aCat = a && a.category ? a.category : '';
@@ -332,14 +333,14 @@ function openModal(mode, id){
     const selAvail = (!a || a.status === 'available') ? 'selected' : '';
     const selMaint = (a && a.status === 'maintenance') ? 'selected' : '';
     
-    html = '<div class="form-grid">' +
-           '<label class="field">식별번호 *<input name="id" required value="' + safe(aId) + '" ' + isReadonly + ' placeholder="EQ-001"></label>' +
-           '<label class="field">분류 *<input name="category" required value="' + safe(aCat) + '" placeholder="측정공구"></label>' +
-           '<label class="field full">비품명 *<input name="name" required value="' + safe(aName) + '"></label>' +
-           '<label class="field full">보관 위치<input name="location" value="' + safe(aLoc) + '" placeholder="분석실 캐비닛 A"></label>' +
-           '<label class="field">상태<select name="status"><option value="available" ' + selAvail + '>사용 가능</option><option value="maintenance" ' + selMaint + '>수리 중</option></select></label>' +
-           '<label class="field">비고<input name="note" value="' + safe(aNote) + '"></label>' +
-           '</div>';
+    parts.push('<div class="form-grid">');
+    parts.push('<label class="field">식별번호 *<input name="id" required value="' + safe(aId) + '" ' + isReadonly + ' placeholder="EQ-001"></label>');
+    parts.push('<label class="field">분류 *<input name="category" required value="' + safe(aCat) + '" placeholder="측정공구"></label>');
+    parts.push('<label class="field full">비품명 *<input name="name" required value="' + safe(aName) + '"></label>');
+    parts.push('<label class="field full">보관 위치<input name="location" value="' + safe(aLoc) + '" placeholder="분석실 캐비닛 A"></label>');
+    parts.push('<label class="field">상태<select name="status"><option value="available" ' + selAvail + '>사용 가능</option><option value="maintenance" ' + selMaint + '>수리 중</option></select></label>');
+    parts.push('<label class="field">비고<input name="note" value="' + safe(aNote) + '"></label>');
+    parts.push('</div>');
   } else if(mode === 'borrow'){
     const avail = assets.filter(function(x){ return statusFor(x) === 'available'; });
     let optHtml = '';
@@ -348,5 +349,44 @@ function openModal(mode, id){
       const isSel = (x.id === id) ? 'selected' : '';
       optHtml += '<option value="' + safe(x.id) + '" ' + isSel + '>' + safe(x.id) + ' · ' + safe(x.name) + '</option>';
     }
-    html = '<div class="form-grid">' +
-           '<label class="field full">비품 *
+    parts.push('<div class="form-grid">');
+    parts.push('<label class="field full">비품 *<select name="asset_id" required>' + optHtml + '</select></label>');
+    parts.push('<label class="field full">대여자 이름 *<input name="borrower_name" required maxlength="100" placeholder="이름 직접 입력"></label>');
+    parts.push('<label class="field">대여 시작일 *<input name="borrowed_at" type="date" required value="' + today() + '"></label>');
+    parts.push('<label class="field">반납 예정일 *<input name="due_date" type="date" required min="' + today() + '" value="' + today() + '"></label>');
+    parts.push('<label class="field full">사용 목적 / 메모<textarea name="memo" rows="2" maxlength="500" placeholder="선택 입력"></textarea><small>대여 기록은 공용 목록에 저장됩니다. 이름 입력은 본인 확인 수단이 아닙니다.</small></label>');
+    parts.push('</div>');
+    if(avail.length === 0){
+      parts.push('<p>현재 대여 가능한 비품이 없습니다.</p>');
+    }
+  } else if(mode === 'editLoan'){
+    parts.push('<p><b>' + safe(assetObjName) + '</b> · ' + safe(lName) + '</p>');
+    parts.push('<div class="form-grid">');
+    parts.push('<label class="field full">대여자 이름 *<input name="borrower_name" required maxlength="100" value="' + safe(lName) + '"></label>');
+    parts.push('<label class="field full">반납 예정일 *<input name="due_date" type="date" required min="' + lStart + '" value="' + safe(lDue) + '"></label>');
+    parts.push('<label class="field full">메모<textarea name="memo" rows="2" maxlength="500">' + safe(lMemo) + '</textarea></label>');
+    parts.push('</div>');
+  } else if(mode === 'return'){
+    parts.push('<p><b>' + safe(assetObjName) + '</b> · ' + safe(lName) + '</p>');
+    parts.push('<div class="form-grid">');
+    parts.push('<label class="field full">실제 반납일 *<input name="returned_at" type="date" required value="' + today() + '" min="' + lStart + '"></label>');
+    parts.push('<label class="field full">반납 메모<textarea name="return_memo" rows="2" maxlength="500" placeholder="파손·분실 여부 등"></textarea></label>');
+    parts.push('</div>');
+  } else {
+    parts.push('<label class="field">관리자 이메일<input name="email" type="email" required autocomplete="username"></label>');
+    parts.push('<label class="field" style="margin-top:12px">비밀번호<input name="password" type="password" required autocomplete="current-password"></label>');
+    parts.push('<p class="sub" style="margin-top:12px">Supabase에서 미리 생성한 관리자 계정만 로그인할 수 있도록 회원가입은 꺼두세요.</p>');
+  }
+  
+  $('modalBody').innerHTML = parts.join('');
+  
+  let btnText = '저장';
+  if(mode === 'borrow') btnText = '대여 등록';
+  else if(mode === 'return') btnText = '반납 완료';
+  else if(mode === 'login') btnText = '로그인';
+  else if(mode === 'editLoan') btnText = '수정 저장';
+  
+  $('saveModal').textContent = btnText;
+  const hasAvail = assets.some(function(x){ return statusFor(x) === 'available'; });
+  $('saveModal').disabled = (mode === 'borrow' && !hasAvail);
+}
