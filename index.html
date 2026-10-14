@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#315ce8"><title>LabStock | 연구실 비품 관리</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+<header class="topbar"><a class="brand" href="#dashboard"><span class="logo">L</span><span>LabStock<small>연구실 비품 관리</small></span></a><div class="top-actions"><span id="connection" class="pill">연결 확인 중</span><button id="loginBtn" class="btn">관리자 로그인</button><button id="logoutBtn" class="btn hidden">로그아웃</button></div></header>
+<div class="layout"><nav class="sidebar" aria-label="주 메뉴"><button class="nav active" data-view="dashboard">▦ 대시보드</button><button class="nav" data-view="inventory">▤ 비품 목록</button><button class="nav" data-view="loans">↗ 대여 현황</button><button class="nav" data-view="history">◷ 대여 이력</button><div class="note"><b>사용 안내</b>비품과 대여 기록은 공용 데이터베이스에 저장됩니다. 관리자 로그인 후 비품 등록·수정과 반납 처리를 할 수 있습니다.</div></nav>
+<main>
+<section class="view active" id="view-dashboard"><div class="page-head"><div><p class="eyebrow">OVERVIEW</p><h1>연구실 비품 현황</h1><p class="sub">공용 비품의 대여 상태와 반납 일정을 확인하세요.</p></div><button class="btn primary" id="quickBorrow">＋ 대여 기록</button></div><div class="metrics" id="metrics"><div class="metric">데이터 불러오는 중…</div></div><div class="grid2"><section class="panel"><div class="panel-head"><div><b>현재 대여 중</b><p class="sub">반납 예정일이 가까운 순서</p></div><button class="text-btn" data-goto="loans">전체 보기 →</button></div><div id="dashboardLoans" class="table-wrap"></div></section><section class="panel"><div class="panel-head"><div><b>최근 활동</b><p class="sub">최근 대여·반납 기록</p></div><button class="text-btn" data-goto="history">이력 보기 →</button></div><div id="recentActivity" class="activity"></div></section></div></section>
+<section class="view" id="view-inventory"><div class="page-head"><div><p class="eyebrow">INVENTORY</p><h1>비품 목록</h1><p class="sub">비품명, 식별번호, 분류, 위치로 검색합니다.</p></div><button class="btn primary admin-only hidden" id="addAsset">＋ 비품 등록</button></div><section class="panel"><div class="toolbar"><input id="assetSearch" placeholder="비품명·식별번호·분류·위치 검색"><select id="assetFilter"><option value="all">모든 상태</option><option value="available">사용 가능</option><option value="borrowed">대여 중</option><option value="maintenance">수리 중</option></select></div><div id="inventoryRows" class="table-wrap"></div></section></section>
+<section class="view" id="view-loans"><div class="page-head"><div><p class="eyebrow">CHECKOUT / CHECK-IN</p><h1>대여 현황</h1><p class="sub">현재 대여 중인 비품과 반납 예정일을 확인합니다.</p></div><button class="btn primary" id="loanAdd">＋ 대여 기록</button></div><section class="panel"><div class="toolbar"><input id="loanSearch" placeholder="비품명·식별번호·대여자 검색"><select id="loanFilter"><option value="active">대여 중</option><option value="all">전체 기록</option><option value="returned">반납 완료</option></select></div><div id="loanRows" class="table-wrap"></div></section></section>
+<section class="view" id="view-history"><div class="page-head"><div><p class="eyebrow">ACTIVITY LOG</p><h1>대여 이력</h1><p class="sub">완료된 대여를 포함한 전체 기록입니다.</p></div><button class="btn" id="exportCsv">CSV 내보내기 ↓</button></div><section class="panel"><div class="toolbar"><input id="historySearch" placeholder="비품명·식별번호·대여자 검색"></div><div id="historyRows"></div></section></section>
+</main></div>
+<div id="modalBackdrop" class="backdrop"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle"><div class="modal-head"><h2 id="modalTitle">대여 기록</h2><button class="icon-btn" id="closeModal" aria-label="닫기">×</button></div><form id="modalForm"><div id="modalBody" class="modal-body"></div><div class="modal-foot"><button type="button" class="btn" id="cancelModal">취소</button><button class="btn primary" type="submit" id="saveModal">저장</button></div></form></section></div>
+<div id="toast" class="toast" role="status"></div>
+<script src="app.js"></script>
+</body></html>
