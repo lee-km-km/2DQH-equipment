@@ -143,6 +143,7 @@ async function loadData(){
 }
 
 function render(){
+  renderHome();
   renderMetrics();
   renderDashboard();
   renderInventory();
@@ -150,6 +151,16 @@ function render(){
   renderHistory();
   renderConsumables();
   setAdminUI();
+}
+
+function renderHome(){
+  const loanEl=$('homeLoanCount'), lowEl=$('homeLowCount');
+  if(!loanEl||!lowEl) return;
+  const active=loans.filter(function(l){ return !l.returned_at; }).length;
+  loanEl.textContent=active+'건 대여 중';
+  const low=consumables.filter(function(c){ return Number(c.quantity)<=Number(c.min_quantity); }).length;
+  lowEl.textContent=low?('재고 부족 '+low+'개'):'';
+  lowEl.classList.toggle('warn',low>0);
 }
 
 function renderMetrics(){
@@ -567,6 +578,7 @@ function nextAssetId(){
   return 'EQ-' + String(max + 1).padStart(3, '0');
 }
 function showView(name){
+  document.body.classList.toggle('home-active', name==='home');
   document.querySelectorAll('.view').forEach(function(el){ el.classList.toggle('active', el.id === 'view-' + name); });
   document.querySelectorAll('.nav[data-view]').forEach(function(el){ el.classList.toggle('active', el.dataset.view === name); });
 }
@@ -589,7 +601,10 @@ function openBestReorder(){
   else openModal('quickReorder');
 }
 
-function closeModal(){ $('modalBackdrop').classList.remove('open'); $('modalForm').reset(); }
+function closeModal(){
+  $('modalBackdrop').classList.remove('open'); $('modalForm').reset();
+  if(window.__labstockFromHome){ window.__labstockFromHome=false; showView('home'); }
+}
 function formValues(form){ return Object.fromEntries(new FormData(form).entries()); }
 async function saveForm(e){
   e.preventDefault();
@@ -707,6 +722,9 @@ function bindEvents(){
       case 'addAsset':if(isAdmin())openModal('asset');else toast('관리자 로그인이 필요합니다.');break;
       case 'addConsumable':if(isAdmin())openModal('consumable');else toast('소모품 등록은 관리자 로그인이 필요합니다.');break;
       case 'loanAdd':case 'quickBorrow':openModal('borrow');break;
+      case 'homeBorrow':window.__labstockFromHome=true;openModal('borrow');break;
+      case 'homeReturn':window.__labstockFromHome=true;openModal('quickReturn');break;
+      case 'homeReorder':window.__labstockFromHome=true;openModal('quickReorder');break;
       case 'mobileBorrow':openModal('borrow');break;
       case 'mobileReturn':showView('loans');openModal('quickReturn');break;
       case 'mobileReorder':openBestReorder();break;
@@ -728,6 +746,7 @@ async function updateRequestStatus(id,status){
 }
 async function initApp(){
   bindEvents();
+  if(window.matchMedia('(max-width:700px)').matches) showView('home');
   if(!db){$('connection').textContent='Supabase 설정 필요';render();return;}
   try{const {data,error}=await db.auth.getSession();if(error)throw error;session=data.session;await refreshAdminState();}
   catch(err){console.warn('세션 확인 실패. 공개 데이터 조회는 계속 시도합니다.',err);}

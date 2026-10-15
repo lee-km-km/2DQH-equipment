@@ -48,6 +48,20 @@ supabase functions deploy low-stock-email --no-verify-jwt
 
 Webhook은 서버에서 Edge Function을 호출하므로 Resend API 키가 브라우저에 노출되지 않습니다. 알림은 새 소모품이 이미 부족한 상태로 생성되거나, 충분한 재고에서 부족 상태로 바뀔 때 전송합니다. 이미 부족 상태인 품목의 일반 수정으로 반복 발송하지 않습니다. 부족 상태에서 재고를 보충한 후 다시 부족 상태로 내려가면 새 알림이 전송됩니다.
 
+## D-2. 구매요청 즉시 메일 (reorder_requests 웹훅)
+구매요청이 들어오면 재고와 상관없이 바로 메일이 가도록 웹훅을 하나 더 만듭니다.
+1. 위 B 단계의 Edge Function을 **다시 배포**합니다: `supabase functions deploy low-stock-email --no-verify-jwt`
+2. Dashboard → Database → Webhooks → 새 webhook 생성
+   - Table: `public.reorder_requests`, Events: **INSERT** 만 선택
+   - Type: HTTP Request, Method: POST, URL: `https://YOUR_PROJECT_REF.supabase.co/functions/v1/low-stock-email` (D 단계와 같은 주소)
+   - Header: `x-labstock-webhook-secret: (D 단계와 같은 값)`
+3. 앱에서 구매요청을 한 번 보내 `LABSTOCK_ALERT_EMAIL` 수신함에 `[LabStock 구매요청]` 메일이 오는지 확인합니다.
+
+기존 `consumables` 웹훅(재고 부족 알림)은 그대로 유지됩니다. 품목 정보는 Edge Function이 서버에서 조회하므로 추가 Secret은 필요 없습니다(`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`는 Supabase가 자동 제공).
+
+## 모바일 QR 홈 화면
+휴대폰 화면(폭 700px 이하)으로 접속하면 먼저 **대여 / 반납 / 구매요청** 큰 버튼 3개만 보이는 홈이 열립니다. 저장하거나 닫으면 홈으로 돌아오고, 상단 메뉴의 `홈`으로도 돌아올 수 있습니다. PC 화면은 기존 대시보드 그대로입니다. 비품실 QR에는 배포된 Vercel 주소를 그대로 넣으면 됩니다.
+
 ## E. GitHub/Vercel 배포
 1. ZIP을 풀고 `index.html`, `style.css`, `app.js`, `supabase.sql`, `consumables_migration.sql`, `README.md`, `supabase/` 폴더를 저장소 루트에 업로드/교체합니다.
 2. Vercel Project Settings → General → Root Directory가 이 파일들이 있는 폴더를 가리키는지 확인합니다.
