@@ -58,27 +58,6 @@ function isAdmin(){
   return admin;
 }
 
-async function ensureUserSession(){
-  if(!db) throw new Error('Supabase 연결을 확인하세요.');
-
-  const {data, error} = await db.auth.getSession();
-  if(error) throw error;
-
-  let currentSession = data.session;
-  if(!currentSession || !currentSession.user || !currentSession.user.id){
-    const {data: anonData, error: anonError} = await db.auth.signInAnonymously();
-    if(anonError) throw anonError;
-    currentSession = anonData.session;
-  }
-
-  if(!currentSession || !currentSession.user || !currentSession.user.id){
-    throw new Error('익명 세션을 만들 수 없습니다. Supabase Authentication에서 Anonymous Sign-Ins를 활성화하세요.');
-  }
-
-  session = currentSession;
-  return currentSession;
-}
-
 function statusFor(a){
   if(borrowedAssetIds.has(a.id)) return 'borrowed';
   if(activeLoanFor(a.id)) return 'borrowed';
@@ -648,7 +627,7 @@ const rowClass = isOut
     rowsHost.innerHTML = '<div class="empty">등록된 소모품이 없습니다. 오른쪽 위에서 첫 소모품을 등록하세요.</div>';
   }
 
-  // 재주문 요청의 상태 변경은 관리자에게만 표시し、재고 변동 이력은 모두 확인 가능
+  // 재주문 요청의 상태 변경은 관리자에게만 표시하고, 재고 변동 이력은 모두 확인 가능
   if(!isAdmin()){
     $('reorderRows').innerHTML = '';
   } else if(!consumablesAvailable){
@@ -1092,8 +1071,6 @@ async function saveForm(e){
       const c = consumableFor(modalId);
       if(!c) throw new Error('소모품을 찾을 수 없습니다.');
 
-      await ensureUserSession();
-
       const {error} = await db.rpc('record_consumable_movement', {
         p_consumable_id: c.id,
         p_movement_type: movementType,
@@ -1109,8 +1086,6 @@ async function saveForm(e){
         : consumableFor(v.consumable_id);
 
       if(!c) throw new Error('소모품을 찾을 수 없습니다.');
-
-      await ensureUserSession();
 
       const {error} = await db.from('reorder_requests').insert({
         consumable_id: c.id,
