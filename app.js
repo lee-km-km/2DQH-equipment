@@ -298,16 +298,14 @@ function renderInventory(){
 
 function updateBorrowCategory(category){
   selectedBorrowCategory = category;
-  const body = $('modalBody');
-  const select = body.querySelector('[name="asset_id"]');
-  const categorySelect = body.querySelector('[name="borrow_category"]');
-  if(categorySelect && categorySelect.value !== category) categorySelect.value = category;
+  const select = $('modalBody').querySelector('[name="asset_id"]');
   if(!select) return;
   const previous = select.value;
   const available = assets.filter(function(a){ return statusFor(a) === 'available' && (category === 'all' || topLevelCategory(a) === category); });
-  select.innerHTML = '<option value="">비품을 선택하세요</option>' + available.map(function(a){ return '<option value="'+safe(a.id)+'">'+safe(a.id)+' · '+safe(a.name)+'</option>'; }).join('');
+  select.innerHTML = available.map(function(a){ return '<option value="'+safe(a.id)+'">'+safe(a.id)+' · '+safe(a.name)+'</option>'; }).join('');
   if(available.some(function(a){ return a.id === previous; })) select.value = previous;
-  else if(available.length === 1) select.value = available[0].id;
+  const tabs = $('modalBody').querySelectorAll('[data-borrow-category]');
+  tabs.forEach(function(tab){ const active = tab.dataset.borrowCategory === category; tab.classList.toggle('active',active); tab.setAttribute('aria-pressed',active?'true':'false'); });
   select.disabled = available.length === 0;
   $('saveModal').disabled = available.length === 0;
 }
@@ -446,29 +444,23 @@ function openModal(mode, id){
     titleText = a ? '비품 정보 수정' : '비품 등록';
   } else if(mode === 'borrow'){
     const avail = assets.filter(function(x){ return statusFor(x) === 'available'; });
-    selectedBorrowCategory = id ? topLevelCategory(assetFor(id)) : 'all';
-    if(!avail.some(function(x){ return topLevelCategory(x) === selectedBorrowCategory; })) selectedBorrowCategory = 'all';
-    const categories = ['all'].concat(TOP_LEVEL_CATEGORIES);
-    const categoryOptions = categories.map(function(cat){
-      const count = cat === 'all' ? avail.length : avail.filter(function(x){return topLevelCategory(x) === cat;}).length;
-      if(cat !== 'all' && count === 0) return '';
-      return '<option value="'+safe(cat)+'" '+(selectedBorrowCategory===cat?'selected':'')+'>'+safe(cat==='all'?'전체 대분류':cat)+' ('+count+')</option>';
+    const categories = Array.from(new Set(avail.map(function(x){ return String(x.category || '').trim(); }).filter(Boolean))).sort(function(a,b){ return a.localeCompare(b, 'ko'); });
+    const selectedAsset = id ? assetFor(id) : null;
+    let selectedCategory = selectedAsset ? String(selectedAsset.category || '').trim() : '';
+    if(!categories.includes(selectedCategory)) selectedCategory = '';
+    const categoryOptions = categories.map(function(cat){ return '<option value="'+safe(cat)+'" '+(cat===selectedCategory?'selected':'')+'>'+safe(cat)+'</option>'; }).join('');
+    const itemOptions = avail.filter(function(x){ return selectedCategory && String(x.category || '').trim() === selectedCategory; }).map(function(x){
+      return '<option value="'+safe(x.id)+'" '+(x.id === id ? 'selected' : '')+'>'+safe(x.name)+' · '+safe(x.id)+'</option>';
     }).join('');
-    const filteredAvail = avail.filter(function(x){ return selectedBorrowCategory === 'all' || topLevelCategory(x) === selectedBorrowCategory; });
-    const assetOptions = '<option value="">비품을 선택하세요</option>' + filteredAvail.map(function(x){
-      return '<option value="'+safe(x.id)+'" '+(x.id===id?'selected':'')+'>'+safe(x.id)+' · '+safe(x.name)+'</option>';
-    }).join('');
-    parts.push('<div class="form-grid">');
-    parts.push('<label class="field full">대분류 선택 *<select name="borrow_category" required>'+categoryOptions+'</select></label>');
-    parts.push('<label class="field full">비품 선택 *<select name="asset_id" required '+(filteredAvail.length?'':'disabled')+'>'+assetOptions+'</select></label>');
+    parts.push('<div class="form-grid borrow-picker">');
+    parts.push('<label class="field full">품목 *<select name="borrow_category" id="borrowCategorySelect"><option value="">품목 선택</option>'+categoryOptions+'</select></label>');
+    parts.push('<label class="field full">비품 *<select name="asset_id" id="borrowAssetSelect" required '+(selectedCategory ? '' : 'disabled')+'><option value="">'+(selectedCategory ? '비품 선택' : '먼저 품목을 선택하세요')+'</option>'+itemOptions+'</select></label>');
     parts.push('<label class="field full">대여자 이름 *<input name="borrower_name" required maxlength="100" placeholder="이름 직접 입력"></label>');
     parts.push('<label class="field">대여 시작일 *<input name="borrowed_at" type="date" required value="' + today() + '"></label>');
     parts.push('<label class="field">반납 예정일 *<input name="due_date" type="date" required min="' + today() + '" value="' + today() + '"></label>');
     parts.push('<label class="field full">사용 목적 / 메모<textarea name="memo" rows="2" maxlength="500" placeholder="선택 입력"></textarea><small>대여 기록은 공용 목록에 저장됩니다. 이름 입력은 본인 확인 수단이 아닙니다.</small></label>');
     parts.push('</div>');
-    if(avail.length === 0){
-      parts.push('<p>현재 대여 가능한 비품이 없습니다.</p>');
-    }
+    if(avail.length === 0) parts.push('<p>현재 대여 가능한 비품이 없습니다.</p>');
   } else if(mode === 'consumable'){
     titleText = id ? '소모품 정보 수정' : '소모품 등록';
   } else if(mode === 'reorder'){
@@ -649,7 +641,7 @@ function openModal(mode, id){
   
   $('saveModal').textContent = btnText;
   const hasAvail = assets.some(function(x){ return statusFor(x) === 'available'; });
-  $('saveModal').disabled = (mode === 'borrow' && (!hasAvail || !assets.some(function(x){ return statusFor(x)==='available' && (selectedBorrowCategory==='all' || topLevelCategory(x)===selectedBorrowCategory); }))); 
+  $('saveModal').disabled = (mode === 'borrow' && !hasAvail); 
   // Mobile friendliness: focus the most important field first.
   setTimeout(function(){
     if(mode === 'borrow'){
@@ -800,6 +792,16 @@ function exportHistoryCsv(){
 }
 function bindEvents(){
   document.querySelectorAll('.nav[data-view]').forEach(function(el){el.addEventListener('click',function(){showView(el.dataset.view);});});
+  document.addEventListener('change',function(e){
+    if(e.target && e.target.id === 'borrowCategorySelect'){
+      const category = e.target.value;
+      const itemSelect = $('borrowAssetSelect');
+      if(!itemSelect) return;
+      const available = assets.filter(function(x){ return statusFor(x)==='available' && category && String(x.category || '').trim()===category; });
+      itemSelect.innerHTML = '<option value="">'+(category ? '비품 선택' : '먼저 품목을 선택하세요')+'</option>' + available.map(function(x){ return '<option value="'+safe(x.id)+'">'+safe(x.name)+' · '+safe(x.id)+'</option>'; }).join('');
+      itemSelect.disabled = !category || available.length === 0;
+    }
+  });
   document.addEventListener('click',function(e){
     const target=e.target.closest('button');if(!target)return;
     if(target.dataset.goto){showView(target.dataset.goto);return;}
@@ -832,7 +834,6 @@ function bindEvents(){
   $('modalForm').addEventListener('submit',saveForm);
   $('modalBackdrop').addEventListener('click',function(e){if(e.target===$('modalBackdrop'))closeModal();});
   $('assetSearch').addEventListener('input',renderInventory);$('assetFilter').addEventListener('change',renderInventory);
-  $('modalBody').addEventListener('change',function(e){if(e.target && e.target.name==='borrow_category') updateBorrowCategory(e.target.value);});
   $('consumableSearch').addEventListener('input',renderConsumables);$('consumableFilter').addEventListener('change',renderConsumables);
   $('loanSearch').addEventListener('input',renderLoans);$('loanFilter').addEventListener('change',renderLoans);$('historySearch').addEventListener('input',renderHistory);
 }
