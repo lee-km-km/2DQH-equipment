@@ -434,10 +434,7 @@ function openModal(mode, id){
       optHtml += '<option value="' + safe(x.id) + '" ' + isSel + '>' + safe(x.id) + ' · ' + safe(x.name) + '</option>';
     }
     parts.push('<div class="form-grid">');
-    window.__borrowAvailAssets = avail;
-    parts.push('<label class="field full">비품 검색<input id="assetSearch" type="search" inputmode="search" autocomplete="off" placeholder="자산번호/이름 검색"></label>');
-    parts.push('<label class="field full">비품 *<select id="assetSelect" name="asset_id" required>' + optHtml + '</select></label>');
-    parts.push('<p class="form-hint" id="assetSearchHint">검색어를 입력하면 목록이 줄어듭니다.</p>');
+    parts.push('<label class="field full">비품 *<select name="asset_id" required>' + optHtml + '</select></label>');
     parts.push('<label class="field full">대여자 이름 *<input name="borrower_name" required maxlength="100" placeholder="이름 직접 입력"></label>');
     parts.push('<label class="field">대여 시작일 *<input name="borrowed_at" type="date" required value="' + today() + '"></label>');
     parts.push('<label class="field">반납 예정일 *<input name="due_date" type="date" required min="' + today() + '" value="' + today() + '"></label>');
@@ -552,37 +549,6 @@ function openModal(mode, id){
   setTimeout(function(){
     if(mode === 'borrow'){
       const el = $('modalBody').querySelector('[name="borrower_name"]'); if(el) el.focus();
-      const search = document.getElementById('assetSearch');
-      const sel = document.getElementById('assetSelect');
-      const hint = document.getElementById('assetSearchHint');
-      const all = window.__borrowAvailAssets || [];
-      function renderOptions(list){
-        if(!sel) return;
-        const current = sel.value;
-        let html='';
-        for(let i=0;i<list.length;i++){
-          const x=list[i];
-          const isSel=(String(x.id)===String(current))?'selected':'';
-          html += '<option value="'+safe(x.id)+'" '+isSel+'>'+safe(x.id)+' · '+safe(x.name)+'</option>';
-        }
-        sel.innerHTML = html;
-        if(hint) hint.textContent = list.length ? ('검색 결과: '+list.length+'개') : '검색 결과가 없습니다.';
-      }
-      function applyFilter(q){
-        const s=(q||'').trim().toLowerCase();
-        if(!s){ renderOptions(all); return; }
-        const filtered = all.filter(function(x){
-          return String(x.id||'').toLowerCase().includes(s) || String(x.name||'').toLowerCase().includes(s);
-        });
-        renderOptions(filtered);
-        if(filtered.length===1 && sel){ sel.value = String(filtered[0].id); }
-      }
-      if(search){
-        search.addEventListener('input', function(){ applyFilter(search.value); });
-        search.addEventListener('keydown', function(e){ if(e.key==='Enter'){ e.preventDefault(); } });
-      }
-      // initial
-      applyFilter('');
     } else if(mode === 'reorder'){
       const el = $('modalBody').querySelector('[name="requester"]'); if(el) el.focus();
     } else if(mode === 'quickReorder'){
