@@ -365,12 +365,13 @@ function renderConsumables(){
     return target.includes(q) && filterMatch;
   });
   // Keep threshold-based inventory metrics and alerts private to administrators.
-  // 재고 요약 카드 영역은 관리자에게만 표시하며, '등록 품목' 카드는 제거합니다.
-  $('consumableSummary').innerHTML = isAdmin() ? [
-    ['재고 없음', outOfStock.length, '현재 수량이 0인 품목'],
+  $('consumableSummary').innerHTML = [
+    ['등록 품목', consumables.length, '등록된 소모품'],
+    ['재고 없음', outOfStock.length, '현재 수량이 0인 품목']
+  ].concat(isAdmin() ? [
     ['최소 보유량 이하', low.length, '관리자 확인 및 재주문 필요'],
     ['재주문 요청', reorderRequests.filter(function(r){ return r.status !== 'received'; }).length, '처리 중인 요청']
-  ].map(function(x){return '<div class="metric"><div class="label">'+x[0]+'</div><div class="value">'+x[1]+'</div><div class="foot">'+x[2]+'</div></div>';}).join('') : '';
+  ] : []).map(function(x){return '<div class="metric"><div class="label">'+x[0]+'</div><div class="value">'+x[1]+'</div><div class="foot">'+x[2]+'</div></div>';}).join('');
   if(!consumablesAvailable){
     $('consumableRows').innerHTML = '<div class="empty">소모품 기능을 시작하려면 프로젝트 ZIP에 포함된 <b>consumables_migration.sql</b>을 Supabase SQL Editor에서 실행하세요.</div>';
   } else if(rows.length){
@@ -443,24 +444,11 @@ function openModal(mode, id){
   if(mode === 'asset'){
     titleText = a ? '비품 정보 수정' : '비품 등록';
   } else if(mode === 'borrow'){
-    const avail = assets.filter(function(x){ return statusFor(x) === 'available'; });
-    const categories = Array.from(new Set(avail.map(function(x){ return String(x.category || '').trim(); }).filter(Boolean))).sort(function(a,b){ return a.localeCompare(b, 'ko'); });
-    const selectedAsset = id ? assetFor(id) : null;
-    let selectedCategory = selectedAsset ? String(selectedAsset.category || '').trim() : '';
-    if(!categories.includes(selectedCategory)) selectedCategory = '';
-    const categoryOptions = categories.map(function(cat){ return '<option value="'+safe(cat)+'" '+(cat===selectedCategory?'selected':'')+'>'+safe(cat)+'</option>'; }).join('');
-    const itemOptions = avail.filter(function(x){ return selectedCategory && String(x.category || '').trim() === selectedCategory; }).map(function(x){
-      return '<option value="'+safe(x.id)+'" '+(x.id === id ? 'selected' : '')+'>'+safe(x.name)+' · '+safe(x.id)+'</option>';
-    }).join('');
-    parts.push('<div class="form-grid borrow-picker">');
-    parts.push('<label class="field full">품목 *<select name="borrow_category" id="borrowCategorySelect"><option value="">품목 선택</option>'+categoryOptions+'</select></label>');
-    parts.push('<label class="field full">비품 *<select name="asset_id" id="borrowAssetSelect" required '+(selectedCategory ? '' : 'disabled')+'><option value="">'+(selectedCategory ? '비품 선택' : '먼저 품목을 선택하세요')+'</option>'+itemOptions+'</select></label>');
-    parts.push('<label class="field full">대여자 이름 *<input name="borrower_name" required maxlength="100" placeholder="이름 직접 입력"></label>');
-    parts.push('<label class="field">대여 시작일 *<input name="borrowed_at" type="date" required value="' + today() + '"></label>');
-    parts.push('<label class="field">반납 예정일 *<input name="due_date" type="date" required min="' + today() + '" value="' + today() + '"></label>');
-    parts.push('<label class="field full">사용 목적 / 메모<textarea name="memo" rows="2" maxlength="500" placeholder="선택 입력"></textarea><small>대여 기록은 공용 목록에 저장됩니다. 이름 입력은 본인 확인 수단이 아닙니다.</small></label>');
-    parts.push('</div>');
-    if(avail.length === 0) parts.push('<p>현재 대여 가능한 비품이 없습니다.</p>');
+    titleText = '대여';
+  } else if(mode === 'return'){
+    titleText = '반납 처리';
+  } else if(mode === 'editLoan'){
+    titleText = '대여 기록 수정';
   } else if(mode === 'consumable'){
     titleText = id ? '소모품 정보 수정' : '소모품 등록';
   } else if(mode === 'reorder'){
@@ -512,26 +500,16 @@ function openModal(mode, id){
     const avail = assets.filter(function(x){ return statusFor(x) === 'available'; });
     selectedBorrowCategory = id ? topLevelCategory(assetFor(id)) : 'all';
     if(!avail.some(function(x){ return topLevelCategory(x) === selectedBorrowCategory; })) selectedBorrowCategory = 'all';
-    const filteredAvail = avail;
+    const filteredAvail = avail.filter(function(x){ return selectedBorrowCategory === 'all' || topLevelCategory(x) === selectedBorrowCategory; });
     let optHtml = '';
     for(let i=0; i<filteredAvail.length; i++){
       const x = filteredAvail[i];
       const isSel = (x.id === id) ? 'selected' : '';
       optHtml += '<option value="' + safe(x.id) + '" ' + isSel + '>' + safe(x.id) + ' · ' + safe(x.name) + '</option>';
     }
-    // 대분류는 별도 버튼 대신 비품 선택 목록 안의 그룹으로 표시합니다.
-    const groupedOptions = TOP_LEVEL_CATEGORIES.map(function(cat){
-      const items = filteredAvail.filter(function(x){ return topLevelCategory(x) === cat; });
-      if(!items.length) return '';
-      return '<optgroup label="'+safe(cat)+'">'+items.map(function(x){
-        return '<option value="'+safe(x.id)+'" '+(x.id === id ? 'selected' : '')+'>'+safe(x.id)+' · '+safe(x.name)+'</option>';
-      }).join('')+'</optgroup>';
-    }).join('');
-    const otherItems = filteredAvail.filter(function(x){ return !TOP_LEVEL_CATEGORIES.includes(topLevelCategory(x)); });
-    if(otherItems.length) optHtml = '<optgroup label="기타">'+otherItems.map(function(x){return '<option value="'+safe(x.id)+'" '+(x.id === id ? 'selected' : '')+'>'+safe(x.id)+' · '+safe(x.name)+'</option>';}).join('')+'</optgroup>';
-    else optHtml = '';
+    parts.push(categoryTabsHtml(selectedBorrowCategory, 'data-borrow-category'));
     parts.push('<div class="form-grid">');
-    parts.push('<label class="field full">비품 *<select name="asset_id" required>' + groupedOptions + optHtml + '</select></label>');
+    parts.push('<label class="field full">비품 *<select name="asset_id" required>' + optHtml + '</select></label>');
     parts.push('<label class="field full">대여자 이름 *<input name="borrower_name" required maxlength="100" placeholder="이름 직접 입력"></label>');
     parts.push('<label class="field">대여 시작일 *<input name="borrowed_at" type="date" required value="' + today() + '"></label>');
     parts.push('<label class="field">반납 예정일 *<input name="due_date" type="date" required min="' + today() + '" value="' + today() + '"></label>');
@@ -641,7 +619,7 @@ function openModal(mode, id){
   
   $('saveModal').textContent = btnText;
   const hasAvail = assets.some(function(x){ return statusFor(x) === 'available'; });
-  $('saveModal').disabled = (mode === 'borrow' && !hasAvail); 
+  $('saveModal').disabled = (mode === 'borrow' && (!hasAvail || !assets.some(function(x){ return statusFor(x)==='available' && (selectedBorrowCategory==='all' || topLevelCategory(x)===selectedBorrowCategory); }))); 
   // Mobile friendliness: focus the most important field first.
   setTimeout(function(){
     if(mode === 'borrow'){
@@ -792,16 +770,6 @@ function exportHistoryCsv(){
 }
 function bindEvents(){
   document.querySelectorAll('.nav[data-view]').forEach(function(el){el.addEventListener('click',function(){showView(el.dataset.view);});});
-  document.addEventListener('change',function(e){
-    if(e.target && e.target.id === 'borrowCategorySelect'){
-      const category = e.target.value;
-      const itemSelect = $('borrowAssetSelect');
-      if(!itemSelect) return;
-      const available = assets.filter(function(x){ return statusFor(x)==='available' && category && String(x.category || '').trim()===category; });
-      itemSelect.innerHTML = '<option value="">'+(category ? '비품 선택' : '먼저 품목을 선택하세요')+'</option>' + available.map(function(x){ return '<option value="'+safe(x.id)+'">'+safe(x.name)+' · '+safe(x.id)+'</option>'; }).join('');
-      itemSelect.disabled = !category || available.length === 0;
-    }
-  });
   document.addEventListener('click',function(e){
     const target=e.target.closest('button');if(!target)return;
     if(target.dataset.goto){showView(target.dataset.goto);return;}
