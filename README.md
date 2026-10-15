@@ -1,76 +1,70 @@
-# LabStock v1 — 연구실 비품 대여 관리
+# LabStock — UI 리뉴얼 + 소모품 재고/이메일 알림
 
-모바일·PC 브라우저에서 사용하는 간단한 공용 비품 관리 웹앱입니다. 데이터는 브라우저 로컬 저장소가 아니라 Supabase PostgreSQL에 저장되므로 여러 기기에서 공유됩니다.
+이 프로젝트는 기존 비품 대여/반납 흐름을 유지하면서 소모품 관리와 재고 이동 기록을 추가합니다.
 
 ## 포함 기능
-- 비품 검색(비품명·식별번호·분류·보관 위치)
-- 비품 등록/수정(관리자)
-- 대여자 이름 직접 입력, 대여 시작일·반납 예정일 기록
-- 현재 대여 현황 및 대여 이력
-- 실제 반납일 기록(관리자)
-- CSV 이력 내보내기
-- 반응형 모바일/PC UI
+- 리뉴얼된 대시보드/탐색 메뉴/카드/테이블 및 모바일 대응
+- 비품 대여·반납·이력 유지
+- 별도 소모품 메뉴, 연구실 내 보관 위치 공유
+- 소모품별 사용/입고 기록으로 수량 자동 차감·증가 (원자적 DB 함수)
+- 사용/입고 이력 및 재주문 요청 상태 추적
+- 재고가 최소 보유량 이하로 처음 내려갈 때 공용 이메일로 알림
+- Supabase Edge Function: `supabase/functions/low-stock-email/index.ts`
 
-## 무료 호스팅 구성
-- **Supabase**: 공유 데이터베이스 및 관리자 인증
-- **Vercel**: 웹사이트 배포
-- 개인별 계정 없이 대여자 이름을 직접 입력할 수 있습니다. 단, 이름은 본인 확인 수단이 아닙니다.
+> 수량은 센서가 실물을 자동 감지하는 값이 아닙니다. 사용/입고 수량을 사람이 기록하면 DB가 공유 재고를 자동으로 계산합니다.
 
-## 1. Supabase 데이터베이스 만들기
-1. https://supabase.com 에서 프로젝트를 생성합니다. 프로젝트 비밀번호는 따로 안전하게 보관합니다.
-2. 프로젝트의 **SQL Editor**를 엽니다.
-3. `supabase.sql` 전체 내용을 붙여넣고 실행합니다.
-4. **Authentication → Users**에서 관리자 사용자를 직접 생성합니다. 프로젝트 설정에서 공개 회원가입(Sign ups)을 비활성화하고, 관리자 계정만 사용하세요.
-5. **Project Settings → API**(또는 Connect 화면)에서 Project URL과 `anon`/publishable public key를 복사합니다. `service_role`/secret key는 절대 웹페이지에 넣지 않습니다.
+## A. Supabase DB 마이그레이션
+1. Supabase Dashboard → SQL Editor를 엽니다.
+2. `consumables_migration.sql` 전체 내용을 실행합니다. 이미 이전 버전의 소모품 기능을 설치했어도 이 파일은 기존 테이블을 유지하며 재고 변동 테이블/함수를 추가합니다.
+3. 소모품 추가/수정은 관리자 로그인 권한이 필요합니다. 사용/입고 기록은 `record_consumable_movement` DB 함수가 수량과 이력을 한 트랜잭션으로 갱신합니다.
 
-## 2. 앱에 Supabase 연결 정보 넣기
-`app.js` 맨 위의 다음 두 값을 바꿉니다.
-```js
-const SUPABASE_URL = 'YOUR_SUPABASE_URL';
-const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
-```
-Supabase URL과 공개 anon/publishable key를 넣은 뒤 저장합니다. 공개 키는 RLS 정책과 함께 쓰도록 설계된 키입니다. 비밀 `service_role` 키는 사용하지 마세요.
+## B. Edge Function 배포
+Supabase CLI를 설치하고 프로젝트 루트에서 로그인/프로젝트 연결 후:
 
-## 3. GitHub에 업로드
-1. GitHub에서 새 저장소(repository)를 만듭니다. 예: `labstock-v1`.
-2. 이 폴더 안의 `index.html`, `style.css`, `app.js`, `supabase.sql`, `README.md` 파일을 저장소 루트에 업로드합니다.
-
-## 4. Vercel에 게시
-1. https://vercel.com 에 로그인하고 **Add New → Project**를 선택합니다.
-2. GitHub 저장소 `labstock-v1`를 가져옵니다.
-3. Framework Preset은 **Other**, Build Command는 비워두고 Output Directory는 `.` 또는 기본값으로 설정합니다.
-4. Deploy를 누릅니다. 배포가 끝나면 `https://...vercel.app` 주소가 생기며, 그 주소를 연구실 구성원에게 공유하면 됩니다.
-
-## 권한 모델 및 운영 전 확인
-- 누구나 비품/대여 이력을 볼 수 있고, 이름을 입력해 대여 기록을 등록할 수 있습니다.
-- 비품 추가·수정, 반납 처리는 관리자 로그인 후에만 가능합니다.
-- SQL 정책상 공개 대여 입력은 허용됩니다. 링크를 아는 사람이 임의 이름으로 기록을 남길 가능성이 있으므로, 처음에는 소규모로 시험 운영하세요. 외부에 공개된 환경에서 악용 방지까지 필요하다면 공용 PIN/초대 코드 또는 승인 대기 절차를 추가해야 합니다.
-- 대여자 이름과 대여 이력이 공개되므로 기관 규정과 개인정보 처리 기준을 확인하세요. 외부 인터넷에 공개하기 전 관리자 승인 및 접근 범위를 검토하는 것을 권장합니다.
-- V1은 단순한 초기 버전입니다. 비품 삭제, 이미지/바코드, 감사 로그, 자동 알림, 정교한 역할 권한은 아직 없습니다.
-
-## 로컬 미리보기
-`index.html`을 브라우저에서 열 수 있지만, Supabase 설정이 없으면 공용 데이터가 표시되지 않습니다. 배포 후 정상 연결 여부를 확인하세요.
-
-
-## 권한 설정 (익명 사용자 세션 + 관리자 계정)
-1. Supabase Authentication 설정에서 **Anonymous Sign-Ins**를 활성화합니다. 일반 사용자는 로그인 화면 없이 기기별 익명 세션을 자동 생성합니다.
-2. 기존 데이터베이스를 백업한 뒤, 새 `supabase.sql`을 SQL Editor에서 실행합니다. 이 스크립트는 필요한 테이블을 생성하고, `assets`, `loans`, `user_roles`의 기존 RLS 정책을 정리한 뒤 새 정책을 만듭니다. 기존 대여 기록의 `user_id`는 비워 두므로 관리자만 볼 수 있습니다. 기존 대여 기록의 `user_id`는 비워 두므로 관리자만 볼 수 있습니다.
-3. Authentication → Users에서 관리자 계정 UUID가 `b8be6f76-9b52-4a3b-b18f-77f67b0d2eb3`인지 확인합니다. 해당 사용자가 실제로 존재할 때 아래 SQL을 별도로 실행해 관리자 권한을 부여합니다.
-
-```sql
-insert into public.user_roles (user_id, role)
-values ('b8be6f76-9b52-4a3b-b18f-77f67b0d2eb3', 'admin')
-on conflict (user_id) do update set role = 'admin';
+```bash
+supabase login
+supabase link --project-ref YOUR_PROJECT_REF
+supabase functions deploy low-stock-email --no-verify-jwt
 ```
 
-4. `app.js`의 Supabase URL과 공개 anon/publishable key를 기존 프로젝트 값으로 유지합니다. `service_role`/secret key는 브라우저 코드에 넣지 않습니다.
-5. 일반 사용자는 자기 대여 기록만 조회·수정·반납 처리할 수 있습니다. 비품 목록에는 타인의 대여자 이름을 노출하지 않고, `get_asset_availability()` RPC를 통해 대여 가능 여부만 표시합니다. 관리자는 관리자 역할이 확인된 경우에만 전체 대여 기록과 비품을 관리합니다.
-6. 익명 세션은 브라우저별로 유지됩니다. 브라우저 데이터 삭제·기기 변경 시 이전 대여 기록을 자동으로 복구할 수 없습니다. 익명 사용자 세션을 탈취한 경우 해당 사용자로 가장할 수 있으므로 공용 PC에서는 사용 후 브라우저 데이터를 관리하세요.
+이 프로젝트의 Supabase URL/공개 키는 기존 `app.js` 설정을 유지합니다. `service_role` 키를 브라우저 코드에 넣지 마세요.
 
-## 소모품 재고 기능 추가
+## C. Resend 이메일 설정
+1. https://resend.com 에서 계정을 만들고 발신 도메인을 인증합니다. 테스트 단계에서는 Resend가 허용한 테스트 수신자만 받을 수 있습니다.
+2. Resend API Key를 생성합니다.
+3. Supabase Dashboard → Edge Functions → `low-stock-email` → Secrets(또는 Project Settings → Edge Function Secrets)에 다음 값을 등록합니다.
+   - `RESEND_API_KEY`: Resend API 키
+   - `LABSTOCK_ALERT_EMAIL`: 연구실 공용 수신 이메일 주소
+   - `LABSTOCK_WEBHOOK_SECRET`: 임의의 긴 랜덤 문자열(아래 Webhook 헤더와 완전히 동일하게)
+   - `RESEND_FROM_EMAIL`: 인증된 발신 주소, 예: `LabStock <alerts@your-verified-domain.com>`
+4. `LABSTOCK_WEBHOOK_SECRET`은 공개하거나 HTML/JS 파일에 넣지 마세요.
 
-1. Supabase 프로젝트의 **SQL Editor**를 엽니다.
-2. 저장소에 포함된 `consumables_migration.sql` 파일 전체를 붙여 넣고 실행합니다. 이 마이그레이션은 기존 `assets` 및 `loans` 테이블을 변경하지 않고 소모품/재주문 테이블과 정책만 추가합니다.
-3. Vercel에 `index.html`, `style.css`, `app.js`를 포함해 저장소 내용을 배포합니다.
-4. 소모품 등록·수정과 재주문 상태(요청됨 → 주문 진행 중 → 입고 완료) 변경은 관리자 로그인이 필요합니다. 일반 사용자는 재고/위치를 조회하고 재주문 요청을 등록할 수 있습니다.
-5. 소모품 부족 여부는 현재 수량이 최소 보유량 이하인지로 계산합니다. 위치는 GPS가 아니라 연구실 내 보관 위치(예: 실험실 A · 2번 캐비닛 · 3번째 서랍)입니다.
+## D. DB Webhook 연결 (서버에서 이메일 자동 발송)
+1. Supabase Dashboard → Database → Webhooks에서 새 webhook을 만듭니다.
+2. Table: `public.consumables`; Events: **INSERT**, **UPDATE** 선택.
+3. Type: HTTP Request, Method: POST, URL: `https://YOUR_PROJECT_REF.supabase.co/functions/v1/low-stock-email`.
+4. Header 추가: `x-labstock-webhook-secret: (LABSTOCK_WEBHOOK_SECRET과 같은 값)`.
+5. 저장하고 테스트할 소모품 하나의 수량을 최소 보유량보다 높게 둔 다음, 사용 기록으로 최소 보유량 이하가 되도록 내려 봅니다.
+
+Webhook은 서버에서 Edge Function을 호출하므로 Resend API 키가 브라우저에 노출되지 않습니다. 알림은 새 소모품이 이미 부족한 상태로 생성되거나, 충분한 재고에서 부족 상태로 바뀔 때 전송합니다. 이미 부족 상태인 품목의 일반 수정으로 반복 발송하지 않습니다. 부족 상태에서 재고를 보충한 후 다시 부족 상태로 내려가면 새 알림이 전송됩니다.
+
+## E. GitHub/Vercel 배포
+1. ZIP을 풀고 `index.html`, `style.css`, `app.js`, `supabase.sql`, `consumables_migration.sql`, `README.md`, `supabase/` 폴더를 저장소 루트에 업로드/교체합니다.
+2. Vercel Project Settings → General → Root Directory가 이 파일들이 있는 폴더를 가리키는지 확인합니다.
+3. Deployments에서 최신 커밋을 재배포합니다.
+4. 배포된 URL에서 `Ctrl + F5`로 강력 새로고침합니다. GitHub의 파일뿐 아니라 Vercel의 실제 배포 커밋도 확인하세요.
+
+## 동작 확인 체크리스트
+- [ ] 대시보드가 새 레이아웃으로 보임
+- [ ] 소모품 메뉴가 나타남
+- [ ] 소모품 등록 (관리자)
+- [ ] 사용 기록을 저장하면 수량이 감소하고 기록이 생성됨
+- [ ] 입고 기록을 저장하면 수량이 증가하고 기록이 생성됨
+- [ ] 재고보다 큰 사용 수량은 거부됨
+- [ ] 최소 보유량 이하로 내려가면 대시보드/목록에서 부족 표시
+- [ ] DB Webhook 및 Resend 설정 후 공용 이메일 수신 확인
+
+## 운영 보안 메모
+- 소모품 재고 조회/사용·입고 기록은 현재 공유 연구실 앱의 공개 접근 모델을 따릅니다. 링크를 가진 사용자가 기록을 남길 수 있으므로 내부 구성원에게만 URL을 공유하고, 운영 환경에서는 로그인/권한 제한을 고려하세요.
+- DB Webhook secret과 Resend API key는 서버 secret으로만 관리하세요.
+- 이메일 전송은 Resend의 발신 도메인/계정 정책에 따릅니다. 서비스 설정 전에는 코드만 배포해도 이메일이 자동 발송되지는 않습니다.

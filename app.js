@@ -9,6 +9,7 @@ let assets = [];
 let loans = [];
 let consumables = [];
 let reorderRequests = [];
+let stockMovements = [];
 let consumablesAvailable = true;
 let session = null;
 let admin = false;
@@ -120,10 +121,12 @@ async function loadData(){
     // Consumables are an optional module until the migration SQL is applied.
     const cRes = await db.from('consumables').select('*').order('name');
     const rRes = await db.from('reorder_requests').select('*, consumables(name, unit, location)').order('created_at', {ascending:false});
-    consumablesAvailable = !cRes.error && !rRes.error;
+    const mRes = await db.from('consumable_movements').select('*, consumables(name, unit)').order('created_at', {ascending:false}).limit(30);
+    consumablesAvailable = !cRes.error && !rRes.error && !mRes.error;
     consumables = cRes.error ? [] : (cRes.data || []);
     reorderRequests = rRes.error ? [] : (rRes.data || []);
-    if(cRes.error || rRes.error) console.warn('소모품 테이블을 사용할 수 없습니다. consumables_migration.sql을 적용했는지 확인하세요.', cRes.error || rRes.error);
+    stockMovements = mRes.error ? [] : (mRes.data || []);
+    if(cRes.error || rRes.error || mRes.error) console.warn('소모품 테이블을 사용할 수 없습니다. consumables_migration.sql을 적용했는지 확인하세요.', cRes.error || rRes.error || mRes.error);
     // Compute availability from loan rows; a missing optional RPC must not block loading.
     borrowedAssetIds = new Set();
     for(let i=0; i<loans.length; i++){
@@ -170,6 +173,15 @@ function renderMetrics(){
 }
 
 function renderDashboard(){
+  const lowStockItems = consumables.filter(function(c){ return Number(c.quantity) <= Number(c.min_quantity); });
+  const notice = $('lowStockNotice');
+  if(notice){
+    if(lowStockItems.length){
+      const preview = lowStockItems.slice(0,4).map(function(c){ return '<span class="low-stock-chip"><b>'+safe(c.name)+'</b><small>'+safe(c.quantity)+' '+safe(c.unit||'개')+' 남음 · '+safe(c.location||'위치 미등록')+'</small></span>'; }).join('');
+      notice.innerHTML = '<section class="stock-alert"><div class="stock-alert-icon">!</div><div class="stock-alert-content"><b>소모품 재고 확인이 필요합니다</b><p>'+lowStockItems.length+'개 품목이 최소 보유량 이하입니다.</p><div class="low-stock-list">'+preview+'</div></div><button class="btn" data-goto="consumables">소모품 확인 →</button></section>';
+    } else if(consumablesAvailable && consumables.length){ notice.innerHTML='<section class="stock-ok"><span>✓</span><div><b>소모품 재고 양호</b><p>현재 최소 보유량 이하인 품목이 없습니다.</p></div><button class="text-btn" data-goto="consumables">재고 보기 →</button></section>'; }
+    else notice.innerHTML='';
+  }
   const active = loans.filter(function(l){ return !l.returned_at; }).sort(function(a,b){
     const da = a.due_date ? a.due_date : '';
     const dbDate = b.due_date ? b.due_date : '';
@@ -301,15 +313,15 @@ function renderConsumables(){
     rows.forEach(function(c){
       const isLow=Number(c.quantity)<=Number(c.min_quantity);
       const status=isLow?'<span class="status low">재주문 필요</span>':'<span class="status available">재고 충분</span>';
-      let actions='<button class="text-btn" data-reorder="'+safe(c.id)+'">재주문 요청</button>';
-      if(isAdmin()) actions+='<button class="text-btn" data-edit-consumable="'+safe(c.id)+'">수정</button>';
+      let actions='<button class="text-btn" data-movement="'+safe(c.id)+'" data-movement-type="use">사용 기록</button><button class="text-btn" data-movement="'+safe(c.id)+'" data-movement-type="in">입고 기록</button><button class="text-btn" data-reorder="'+safe(c.id)+'">재주문 요청</button>';
+      if(isAdmin()) actions+='<button class="text-btn" data-edit-consumable="'+safe(c.id)+'">정보 수정</button>';
       html+='<tr class="'+(isLow?'low-row':'')+'"><td><b>'+safe(c.name)+'</b><div class="asset-id">'+safe(c.category||'기타')+'</div></td><td><b>'+safe(c.quantity)+' '+safe(c.unit||'개')+'</b></td><td>'+safe(c.min_quantity)+' '+safe(c.unit||'개')+'</td><td><span class="location-text">'+safe(c.location||'위치 미등록')+'</span></td><td>'+status+'</td><td>'+actions+'</td></tr>';
     });
     $('consumableRows').innerHTML='<table><thead><tr><th>소모품 / 분류</th><th>현재 수량</th><th>최소 보유량</th><th>보관 위치</th><th>상태</th><th>작업</th></tr></thead><tbody>'+html+'</tbody></table>';
   } else $('consumableRows').innerHTML='<div class="empty">등록된 소모품이 없습니다.'+(isAdmin()?' 오른쪽 위에서 첫 소모품을 등록하세요.':'')+'</div>';
 
   if(!consumablesAvailable){ $('reorderRows').innerHTML='<div class="empty">소모품 데이터베이스 설정이 필요합니다.</div>'; return; }
-  if(!reorderRequests.length){ $('reorderRows').innerHTML='<div class="empty">아직 재주문 요청이 없습니다.</div>'; return; }
+  if(!reorderRequests.length){ $('reorderRows').innerHTML='<div class="empty">아직 재주문 요청이 없습니다.</div>'; } else {
   let requestHtml='';
   reorderRequests.forEach(function(r){
     const name=(r.consumables&&r.consumables.name)||consumableFor(r.consumable_id)?.name||'삭제된 품목';
@@ -319,6 +331,9 @@ function renderConsumables(){
     requestHtml+='<tr><td><b>'+safe(name)+'</b><div class="asset-id">'+safe(r.requester||'요청자 미입력')+' · '+dateText(String(r.created_at||'').slice(0,10))+'</div></td><td>'+safe(r.requested_quantity)+' '+safe((r.consumables&&r.consumables.unit)||'개')+'</td><td><span class="status '+(r.status==='received'?'available':r.status==='ordered'?'ordered':'pending')+'">'+label+'</span></td><td>'+safe(r.note||'—')+'</td><td>'+action+'</td></tr>';
   });
   $('reorderRows').innerHTML='<table><thead><tr><th>품목 / 요청자</th><th>요청 수량</th><th>진행 상태</th><th>메모</th><th>관리</th></tr></thead><tbody>'+requestHtml+'</tbody></table>';
+  }
+  if(!stockMovements.length){ $('movementRows').innerHTML='<div class="empty">아직 재고 변동 기록이 없습니다.</div>'; }
+  else { let movementHtml=''; stockMovements.forEach(function(m){ const isIn=m.movement_type==='in'; movementHtml+='<tr><td><b>'+safe((m.consumables&&m.consumables.name)||consumableFor(m.consumable_id)?.name||'소모품')+'</b><div class="asset-id">'+safe(m.actor||'사용자 미입력')+' · '+dateText(String(m.created_at||'').slice(0,10))+'</div></td><td><span class="status '+(isIn?'available':'borrowed')+'">'+(isIn?'입고':'사용')+'</span></td><td><b>'+(isIn?'+':'−')+safe(m.quantity)+' '+safe((m.consumables&&m.consumables.unit)||'개')+'</b></td><td>'+safe(m.note||'—')+'</td></tr>'; }); $('movementRows').innerHTML='<table><thead><tr><th>품목 / 기록자</th><th>유형</th><th>변동 수량</th><th>메모</th></tr></thead><tbody>'+movementHtml+'</tbody></table>'; }
 }
 function consumableFor(id){ return consumables.find(function(c){return String(c.id)===String(id);})||null; }
 
@@ -362,6 +377,8 @@ function openModal(mode, id){
     titleText = id ? '소모품 정보 수정' : '소모품 등록';
   } else if(mode === 'reorder'){
     titleText = '재주문 요청';
+  } else if(mode === 'movement'){
+    titleText = id ? '재고 변동 기록' : '재고 변동 기록';
   }
   $('modalTitle').textContent = titleText;
 
@@ -431,6 +448,11 @@ function openModal(mode, id){
       parts.push('<label class="field full">비고<textarea name="note" rows="2" maxlength="500">'+safe(c?c.note:'')+'</textarea></label>');
       parts.push('</div>');
     }
+  } else if(mode === 'movement'){
+    const c=consumableFor(id);
+    const moveType=window.__labstockMovementType==='in'?'in':'use';
+    if(!c) parts.push('<p>소모품을 찾을 수 없습니다.</p>');
+    else { parts.push('<p><b>'+safe(c.name)+'</b> · 현재 재고 <b>'+safe(c.quantity)+' '+safe(c.unit||'개')+'</b><br><span class="sub">'+safe(c.location||'위치 미등록')+'</span></p>'); parts.push('<div class="form-grid" style="margin-top:16px"><label class="field">기록 유형<select name="movement_type"><option value="use" '+(moveType==='use'?'selected':'')+'>사용 / 재고 차감</option><option value="in" '+(moveType==='in'?'selected':'')+'>입고 / 재고 증가</option></select></label><label class="field">수량 *<input name="quantity" type="number" min="0.01" step="any" required></label><label class="field full">기록자 *<input name="actor" required maxlength="100" placeholder="이름"></label><label class="field full">메모<textarea name="note" rows="2" maxlength="500" placeholder="사용 목적 또는 입고 정보"></textarea></label></div><p class="form-hint">저장 즉시 공용 재고 수량이 반영됩니다. 사용 기록으로 재고가 0 미만이 되지는 않습니다.</p>'); }
   } else if(mode === 'reorder'){
     const c=consumableFor(id);
     if(!c) parts.push('<p>소모품을 찾을 수 없습니다.</p>');
@@ -469,6 +491,7 @@ function openModal(mode, id){
   else if(mode === 'editLoan') btnText = '수정 저장';
   else if(mode === 'consumable') btnText = '소모품 저장';
   else if(mode === 'reorder') btnText = '재주문 요청';
+  else if(mode === 'movement') btnText = '재고 반영';
   
   $('saveModal').textContent = btnText;
   const hasAvail = assets.some(function(x){ return statusFor(x) === 'available'; });
@@ -510,6 +533,10 @@ async function saveForm(e){
       const payload={name:v.name.trim(),category:(v.category||'기타').trim(),unit:v.unit.trim(),quantity:Number(v.quantity),min_quantity:Number(v.min_quantity),location:v.location.trim(),note:(v.note||'').trim(),updated_at:new Date().toISOString()};
       const result=modalId?await db.from('consumables').update(payload).eq('id',modalId):await db.from('consumables').insert(payload);
       if(result.error) throw result.error;
+    } else if(modalMode === 'movement'){
+      const c=consumableFor(modalId); if(!c) throw new Error('소모품을 찾을 수 없습니다.');
+      const {data,error}=await db.rpc('record_consumable_movement',{p_consumable_id:c.id,p_movement_type:v.movement_type,p_quantity:Number(v.quantity),p_actor:v.actor.trim(),p_note:(v.note||'').trim()});
+      if(error) throw error;
     } else if(modalMode === 'reorder'){
       const c=consumableFor(modalId); if(!c) throw new Error('소모품을 찾을 수 없습니다.');
       const {error}=await db.from('reorder_requests').insert({consumable_id:c.id,requested_quantity:Number(v.requested_quantity),requester:v.requester.trim(),note:(v.note||'').trim(),status:'pending'});
@@ -573,6 +600,7 @@ function bindEvents(){
     if(target.dataset.editLoan){openModal('editLoan',target.dataset.editLoan);return;}
     if(target.dataset.editConsumable){openModal('consumable',target.dataset.editConsumable);return;}
     if(target.dataset.reorder){openModal('reorder',target.dataset.reorder);return;}
+    if(target.dataset.movement){window.__labstockMovementType=target.dataset.movementType||'use';openModal('movement',target.dataset.movement);return;}
     if(target.dataset.requestStatus){updateRequestStatus(target.dataset.requestStatus,target.dataset.status);return;}
     switch(target.id){
       case 'loginBtn':openModal('login');break;
