@@ -574,22 +574,29 @@ function renderConsumables(){
           ? '<span class="status low">최소 보유량 이하</span>'
           : '<span class="status available">재고 있음</span>');
 
-      let actions = '';
+let actions = '';
 
-      if(isAdmin()){
-        actions += '<button class="text-btn" data-movement="' + safe(c.id) +
-          '" data-movement-type="use">사용 기록</button>';
-        actions += '<button class="text-btn" data-movement="' + safe(c.id) +
-          '" data-movement-type="in">입고 기록</button>';
-        actions += '<button class="text-btn" data-reorder="' + safe(c.id) +
-          '">' + (isOut ? '구매 요청' : '재주문 요청') + '</button>';
-        actions += '<button class="text-btn" data-edit-consumable="' +
-          safe(c.id) + '">정보 수정</button>';
-      }
+// 구매요청은 비로그인 사용자도 가능
+actions += '<button class="text-btn" data-reorder="' +
+  safe(c.id) + '">' +
+  (isOut ? '구매 요청' : '재주문 요청') +
+  '</button>';
 
-      const rowClass = isOut
-        ? 'out-of-stock'
-        : (isAdmin() && isLow ? 'low-row' : '');
+// 재고 변동 및 품목 수정은 관리자 전용
+if (isAdmin()) {
+  actions += '<button class="text-btn" data-movement="' +
+    safe(c.id) + '" data-movement-type="use">사용 기록</button>';
+
+  actions += '<button class="text-btn" data-movement="' +
+    safe(c.id) + '" data-movement-type="in">입고 기록</button>';
+
+  actions += '<button class="text-btn" data-edit-consumable="' +
+    safe(c.id) + '">정보 수정</button>';
+}
+
+const rowClass = isOut
+  ? 'out-of-stock'
+  : (isAdmin() && isLow ? 'low-row' : '');
 
       html += '<tr class="' + rowClass + '">' +
         '<td><b>' + safe(c.name) +
