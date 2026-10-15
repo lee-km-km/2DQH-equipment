@@ -583,8 +583,8 @@ actions += '<button class="text-btn" data-reorder="' +
   '</button>';
 
 // 비로그인 사용자도 재고 사용/입고 기록 가능
-actions += '<button class="text-btn" data-movement="' + safe(c.id) + '" data-movement-type="use">사용 기록</button>';
-actions += '<button class="text-btn" data-movement="' + safe(c.id) + '" data-movement-type="in">입고 기록</button>';
+actions += '<button class="text-btn" data-movement="' + safe(c.id) + '" data-movement-type="use">사용량 입력</button>';
+actions += '<button class="text-btn" data-movement="' + safe(c.id) + '" data-movement-type="in">재고 보충</button>';
 actions += '<button class="text-btn" data-edit-consumable="' + safe(c.id) + '">재고 수정</button>';
 
 const rowClass = isOut
@@ -685,17 +685,17 @@ const rowClass = isOut
       movementHtml += '<tr><td><b>' +
         safe((m.consumables && m.consumables.name) ||
           consumableFor(m.consumable_id)?.name || '소모품') +
-        '</b><div class="asset-id">' + safe(m.actor || '사용자 미입력') +
+        '</b><div class="asset-id">' + safe(m.actor || '처리자 미입력') +
         ' · ' + dateText(String(m.created_at || '').slice(0,10)) +
         '</div></td><td><span class="status ' +
         (isIn ? 'available' : 'borrowed') + '">' +
-        (isIn ? '입고' : '사용') +
+        (isIn ? '재고 보충' : '사용량 차감') +
         '</span></td><td><b>' + (isIn ? '+' : '−') +
         safe(m.quantity) + ' ' + safe((m.consumables && m.consumables.unit) || '개') +
         '</b></td><td>' + safe(m.note || '—') + '</td></tr>';
     });
 
-    $('movementRows').innerHTML = '<table><thead><tr><th>품목 / 기록자</th><th>유형</th><th>변동 수량</th><th>메모</th></tr></thead><tbody>' +
+    $('movementRows').innerHTML = '<table><thead><tr><th>품목 / 처리자</th><th>변동 구분</th><th>변동 수량</th><th>메모</th></tr></thead><tbody>' +
       movementHtml + '</tbody></table>';
   }
 }
@@ -764,7 +764,7 @@ function openModal(mode, id){
   } else if(mode === 'reorder'){
     titleText = '재주문 요청';
   } else if(mode === 'movement'){
-    titleText = '재고 변동 기록';
+    titleText = window.__labstockMovementType === 'in' ? '재고 보충 입력' : '사용량 입력';
   } else if(mode === 'quickReturn'){
     titleText = '빠른 반납';
   } else if(mode === 'quickReorder'){
@@ -849,10 +849,15 @@ function openModal(mode, id){
       parts.push('<p>현재 대여 가능한 비품이 없습니다.</p>');
     }
   } else if(mode === 'consumable'){
-    if(!isAdmin()){
-      parts.push('<p>소모품 등록 및 수정은 관리자 로그인이 필요합니다.</p>');
+    const c = consumableFor(id);
+
+    if(!isAdmin() && !c){
+      parts.push('<p>소모품을 찾을 수 없습니다.</p>');
+    } else if(!isAdmin() && c){
+      parts.push('<p><b>' + safe(c.name) + '</b> · 현재 수량 ' + safe(c.quantity) + ' ' + safe(c.unit || '개') + '</p>');
+      parts.push('<div class="form-grid"><label class="field full">수정할 수량 *<input name="quantity" type="number" min="0" step="any" required value="' + safe(c.quantity) + '"></label></div>');
+      parts.push('<p class="form-hint">수량만 변경됩니다. 사용량 차감이나 재고 보충 내역을 남기려면 해당 기능을 이용하세요.</p>');
     } else {
-      const c = consumableFor(id);
 
       parts.push('<div class="form-grid">');
       parts.push('<label class="field full">소모품명 *<input name="name" required maxlength="160" value="' + safe(c ? c.name : '') + '" placeholder="예: 200 µL 피펫 팁"></label>');
@@ -868,20 +873,18 @@ function openModal(mode, id){
     const c = consumableFor(id);
     const moveType = window.__labstockMovementType === 'in' ? 'in' : 'use';
 
-    if(!isAdmin()){
-      parts.push('<p>재고 변동 기록은 관리자 로그인이 필요합니다.</p>');
-    } else if(!c){
+    if(!c){
       parts.push('<p>소모품을 찾을 수 없습니다.</p>');
     } else {
       parts.push('<p><b>' + safe(c.name) + '</b> · 현재 재고 <b>' +
         safe(c.quantity) + ' ' + safe(c.unit || '개') +
         '</b><br><span class="sub">' + safe(c.location || '위치 미등록') + '</span></p>');
 
-      parts.push('<div class="form-grid" style="margin-top:16px"><label class="field">기록 유형<select name="movement_type"><option value="use" ' +
+      parts.push('<div class="form-grid" style="margin-top:16px"><label class="field">변동 구분<select name="movement_type"><option value="use" ' +
         (moveType === 'use' ? 'selected' : '') +
-        '>사용 / 재고 차감</option><option value="in" ' +
+        '>사용량 차감</option><option value="in" ' +
         (moveType === 'in' ? 'selected' : '') +
-        '>입고 / 재고 증가</option></select></label><label class="field">수량 *<input name="quantity" type="number" min="0.01" step="any" required></label><label class="field full">기록자 *<input name="actor" required maxlength="100" placeholder="이름"></label><label class="field full">메모<textarea name="note" rows="2" maxlength="500" placeholder="사용 목적 또는 입고 정보"></textarea></label></div><p class="form-hint">저장 즉시 공용 재고 수량이 반영됩니다. 사용 기록으로 재고가 0 미만이 되지는 않습니다.</p>');
+        '>재고 보충</option></select></label><label class="field">수량 *<input name="quantity" type="number" min="0.01" step="any" required></label><label class="field full">처리자 *<input name="actor" required maxlength="100" placeholder="이름"></label><label class="field full">메모<textarea name="note" rows="2" maxlength="500" placeholder="사용처 또는 보충 내역"></textarea></label></div><p class="form-hint">저장하면 공용 재고 수량에 바로 반영됩니다. 사용량 차감으로 재고가 0 미만이 되지는 않습니다.</p>');
     }
   } else if(mode === 'reorder'){
     const c = consumableFor(id);
@@ -900,7 +903,6 @@ function openModal(mode, id){
       parts.push('<label class="field full">메모<textarea name="note" rows="2" maxlength="500" placeholder="구매처, 제품번호 등 (선택)"></textarea></label></div>');
     }
   } else if(mode === 'quickReorder'){
-    if(false){ /* 비로그인 구매요청 허용 */ } else {
       const list = consumables.slice().sort(function(a,b){
         const ao = Number(a.quantity) <= 0 ? 0 : (Number(a.quantity) <= Number(a.min_quantity) ? 1 : 2);
         const bo = Number(b.quantity) <= 0 ? 0 : (Number(b.quantity) <= Number(b.min_quantity) ? 1 : 2);
@@ -930,8 +932,6 @@ function openModal(mode, id){
         parts.push('<label class="field full">메모<textarea name="note" rows="2" maxlength="500" placeholder="구매처, 제품번호 등 (선택)"></textarea></label>');
         parts.push('</div>');
         parts.push('<p class="form-hint">재고가 0인 품목은 즉시 구매요청으로 연결됩니다.</p>');
-      }
-    }
   } else if(mode === 'quickReturn'){
     const active = loans.filter(function(l){
       return !l.returned_at;
@@ -981,7 +981,7 @@ function openModal(mode, id){
   else if(mode === 'editLoan') btnText = '수정 저장';
   else if(mode === 'consumable') btnText = '소모품 저장';
   else if(mode === 'reorder') btnText = '재주문 요청';
-  else if(mode === 'movement') btnText = '재고 반영';
+  else if(mode === 'movement') btnText = '수량 반영';
   else if(mode === 'quickReturn') btnText = '반납 완료';
   else if(mode === 'quickReorder') btnText = '구매요청';
 
@@ -1139,20 +1139,29 @@ async function saveForm(e){
       if(result.error) throw result.error;
     } else if(modalMode === 'consumable'){
 
-      const payload = {
-        name: v.name.trim(),
-        category: (v.category || '기타').trim(),
-        unit: v.unit.trim(),
-        quantity: Number(v.quantity),
-        min_quantity: Number(v.min_quantity),
-        location: v.location.trim(),
-        note: (v.note || '').trim(),
-        updated_at: new Date().toISOString()
-      };
+      let result;
+      if(!isAdmin()){
+        if(!modalId) throw new Error('소모품 등록은 관리자 로그인이 필요합니다.');
+        result = await db.from('consumables').update({
+          quantity: Number(v.quantity),
+          updated_at: new Date().toISOString()
+        }).eq('id', modalId);
+      } else {
+        const payload = {
+          name: v.name.trim(),
+          category: (v.category || '기타').trim(),
+          unit: v.unit.trim(),
+          quantity: Number(v.quantity),
+          min_quantity: Number(v.min_quantity),
+          location: v.location.trim(),
+          note: (v.note || '').trim(),
+          updated_at: new Date().toISOString()
+        };
 
-      const result = modalId
-        ? await db.from('consumables').update(payload).eq('id', modalId)
-        : await db.from('consumables').insert(payload);
+        result = modalId
+          ? await db.from('consumables').update(payload).eq('id', modalId)
+          : await db.from('consumables').insert(payload);
+      }
 
       if(result.error) throw result.error;
     } else if(modalMode === 'movement'){
