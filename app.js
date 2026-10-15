@@ -585,7 +585,7 @@ actions += '<button class="text-btn" data-reorder="' +
 // 비로그인 사용자도 재고 사용/입고 기록 가능
 actions += '<button class="text-btn" data-movement="' + safe(c.id) + '" data-movement-type="use">사용 기록</button>';
 actions += '<button class="text-btn" data-movement="' + safe(c.id) + '" data-movement-type="in">입고 기록</button>';
-if (isAdmin()) actions += '<button class="text-btn" data-edit-consumable="' + safe(c.id) + '">정보 수정</button>';
+actions += '<button class="text-btn" data-edit-consumable="' + safe(c.id) + '">재고 수정</button>';
 
 const rowClass = isOut
   ? 'out-of-stock'
@@ -900,7 +900,7 @@ function openModal(mode, id){
       parts.push('<label class="field full">메모<textarea name="note" rows="2" maxlength="500" placeholder="구매처, 제품번호 등 (선택)"></textarea></label></div>');
     }
   } else if(mode === 'quickReorder'){
-    if(false){ parts.push('<p>구매요청은 관리자 로그인이 필요합니다.</p>'); } else {
+    if(false){ /* 비로그인 구매요청 허용 */ } else {
       const list = consumables.slice().sort(function(a,b){
         const ao = Number(a.quantity) <= 0 ? 0 : (Number(a.quantity) <= Number(a.min_quantity) ? 1 : 2);
         const bo = Number(b.quantity) <= 0 ? 0 : (Number(b.quantity) <= Number(b.min_quantity) ? 1 : 2);
@@ -1138,7 +1138,6 @@ async function saveForm(e){
 
       if(result.error) throw result.error;
     } else if(modalMode === 'consumable'){
-      if(!isAdmin()) throw new Error('소모품 등록·수정은 관리자 로그인이 필요합니다.');
 
       const payload = {
         name: v.name.trim(),
@@ -1381,10 +1380,6 @@ function bindEvents(){
     }
 
     if(target.dataset.editConsumable){
-      if(!isAdmin()){
-        toast('소모품 수정은 관리자 로그인이 필요합니다.');
-        return;
-      }
       openModal('consumable', target.dataset.editConsumable);
       return;
     }
