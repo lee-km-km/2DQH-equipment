@@ -89,6 +89,9 @@ function setAdminUI(){
   for(let i=0; i<adminEls.length; i++){
     adminEls[i].classList.toggle('hidden', !isAdmin());
   }
+  // 관리자 전용 화면에서 로그아웃하면 일반 사용자가 볼 수 있는 전체 비품 화면으로 이동
+  const activeView = document.querySelector('.view.active');
+  if(!isAdmin() && activeView && activeView.classList.contains('admin-only')) showView('inventory');
   $('connection').textContent = db ? '공용 DB 연결' : '설정 필요';
 }
 
@@ -578,6 +581,7 @@ function nextAssetId(){
   return 'EQ-' + String(max + 1).padStart(3, '0');
 }
 function showView(name){
+  if((name === 'dashboard' || name === 'history') && !isAdmin()) name = 'inventory';
   document.body.classList.toggle('home-active', name==='home');
   document.querySelectorAll('.view').forEach(function(el){ el.classList.toggle('active', el.id === 'view-' + name); });
   document.querySelectorAll('.nav[data-view]').forEach(function(el){ el.classList.toggle('active', el.dataset.view === name); });
