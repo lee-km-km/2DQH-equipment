@@ -138,7 +138,7 @@ async function loadData(){
     const rRes = await db.from('reorder_requests').select('*, consumables(name, unit, location)').order('created_at', {ascending:false});
     const mRes = await db.from('consumable_movements').select('*, consumables(name, unit)').order('created_at', {ascending:false}).limit(30);
 
-    consumablesAvailable = !cRes.error && !rRes.error && !mRes.error;
+    consumablesAvailable = !cRes.error;
     consumables = cRes.error ? [] : (cRes.data || []);
     reorderRequests = rRes.error ? [] : (rRes.data || []);
     stockMovements = mRes.error ? [] : (mRes.data || []);
@@ -582,17 +582,10 @@ actions += '<button class="text-btn" data-reorder="' +
   (isOut ? '구매 요청' : '재주문 요청') +
   '</button>';
 
-// 재고 변동 및 품목 수정은 관리자 전용
-if (isAdmin()) {
-  actions += '<button class="text-btn" data-movement="' +
-    safe(c.id) + '" data-movement-type="use">사용 기록</button>';
-
-  actions += '<button class="text-btn" data-movement="' +
-    safe(c.id) + '" data-movement-type="in">입고 기록</button>';
-
-  actions += '<button class="text-btn" data-edit-consumable="' +
-    safe(c.id) + '">정보 수정</button>';
-}
+// 비로그인 사용자도 재고 사용/입고 기록 가능
+actions += '<button class="text-btn" data-movement="' + safe(c.id) + '" data-movement-type="use">사용 기록</button>';
+actions += '<button class="text-btn" data-movement="' + safe(c.id) + '" data-movement-type="in">입고 기록</button>';
+if (isAdmin()) actions += '<button class="text-btn" data-edit-consumable="' + safe(c.id) + '">정보 수정</button>';
 
 const rowClass = isOut
   ? 'out-of-stock'
@@ -907,9 +900,7 @@ function openModal(mode, id){
       parts.push('<label class="field full">메모<textarea name="note" rows="2" maxlength="500" placeholder="구매처, 제품번호 등 (선택)"></textarea></label></div>');
     }
   } else if(mode === 'quickReorder'){
-    if(!isAdmin()){
-      parts.push('<p>구매요청은 관리자 로그인이 필요합니다.</p>');
-    } else {
+    if(false){ parts.push('<p>구매요청은 관리자 로그인이 필요합니다.</p>'); } else {
       const list = consumables.slice().sort(function(a,b){
         const ao = Number(a.quantity) <= 0 ? 0 : (Number(a.quantity) <= Number(a.min_quantity) ? 1 : 2);
         const bo = Number(b.quantity) <= 0 ? 0 : (Number(b.quantity) <= Number(b.min_quantity) ? 1 : 2);
@@ -1069,13 +1060,7 @@ function firstOutOfStockConsumable(){
 }
 
 function openBestReorder(){
-  if(!isAdmin()){
-    toast('구매요청은 관리자 로그인이 필요합니다.');
-    return;
-  }
-
   showView('consumables');
-
   const c = firstOutOfStockConsumable();
   if(c) openModal('reorder', c.id);
   else openModal('quickReorder');
@@ -1172,8 +1157,16 @@ async function saveForm(e){
 
       if(result.error) throw result.error;
     } else if(modalMode === 'movement'){
-      if(!isAdmin()) throw new Error('재고 변동 기록은 관리자 로그인이 필요합니다.');
-
+      const {data: sessionData, error: sessionError} = await db.auth.getSession();
+      if(sessionError) throw sessionError;
+      let currentSession = sessionData.session;
+      if(!currentSession || !currentSession.user || !currentSession.user.id){
+        const {data, error} = await db.auth.signInAnonymously();
+        if(error) throw new Error('비로그인 재고 수정 세션 생성 실패: ' + error.message);
+        currentSession = data.session;
+      }
+      if(!currentSession || !currentSession.user || !currentSession.user.id) throw new Error('재고 수정 사용자 세션을 생성하지 못했습니다.');
+      session = currentSession;
       const c = consumableFor(modalId);
       if(!c) throw new Error('소모품을 찾을 수 없습니다.');
 
@@ -1187,8 +1180,16 @@ async function saveForm(e){
 
       if(error) throw error;
     } else if(modalMode === 'reorder' || modalMode === 'quickReorder'){
-      if(!isAdmin()) throw new Error('재주문 요청은 관리자 로그인이 필요합니다.');
-
+      const {data: sessionData, error: sessionError} = await db.auth.getSession();
+      if(sessionError) throw sessionError;
+      let currentSession = sessionData.session;
+      if(!currentSession || !currentSession.user || !currentSession.user.id){
+        const {data, error} = await db.auth.signInAnonymously();
+        if(error) throw new Error('비로그인 구매요청 세션 생성 실패: ' + error.message);
+        currentSession = data.session;
+      }
+      if(!currentSession || !currentSession.user || !currentSession.user.id) throw new Error('구매요청 사용자 세션을 생성하지 못했습니다.');
+      session = currentSession;
       const c = modalMode === 'reorder'
         ? consumableFor(modalId)
         : consumableFor(v.consumable_id);
@@ -1388,20 +1389,9 @@ function bindEvents(){
       return;
     }
 
-    if(target.dataset.reorder){
-      if(!isAdmin()){
-        toast('재주문 요청은 관리자 로그인이 필요합니다.');
-        return;
-      }
-      openModal('reorder', target.dataset.reorder);
-      return;
-    }
+    if(target.dataset.reorder){ openModal('reorder', target.dataset.reorder); return; }
 
     if(target.dataset.movement){
-      if(!isAdmin()){
-        toast('재고 변동 기록은 관리자 로그인이 필요합니다.');
-        return;
-      }
       window.__labstockMovementType = target.dataset.movementType || 'use';
       openModal('movement', target.dataset.movement);
       return;
@@ -1460,10 +1450,6 @@ function bindEvents(){
         break;
 
       case 'homeReorder':
-        if(!isAdmin()){
-          toast('구매요청은 관리자 로그인이 필요합니다.');
-          break;
-        }
         window.__labstockFromHome = true;
         openModal('quickReorder');
         break;
