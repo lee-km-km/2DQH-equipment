@@ -932,6 +932,8 @@ function openModal(mode, id){
         parts.push('<label class="field full">메모<textarea name="note" rows="2" maxlength="500" placeholder="구매처, 제품번호 등 (선택)"></textarea></label>');
         parts.push('</div>');
         parts.push('<p class="form-hint">재고가 0인 품목은 즉시 구매요청으로 연결됩니다.</p>');
+      }
+    }
   } else if(mode === 'quickReturn'){
     const active = loans.filter(function(l){
       return !l.returned_at;
