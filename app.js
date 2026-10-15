@@ -37,85 +37,6 @@ function safe(v){
   });
 }
 
-// ===== Asset big category helpers (대분류/세부분류) =====
-const ASSET_PREFIX_TO_MAIN = { EQ: '공구' };
-const ASSET_MAIN_DEFAULTS = ['공구','측정공구','장비','부품','기타'];
-
-function splitAssetCategory(cat){
-  const raw = (cat || '').trim();
-  if(!raw) return {main:'', sub:''};
-  let parts = raw.split('>').map(function(x){ return x.trim(); }).filter(Boolean);
-  if(parts.length < 2) parts = raw.split('/').map(function(x){ return x.trim(); }).filter(Boolean);
-  if(parts.length < 2) parts = raw.split('|').map(function(x){ return x.trim(); }).filter(Boolean);
-  if(parts.length >= 2){
-    return {main: parts[0], sub: parts.slice(1).join(' > ')};
-  }
-  return {main:'', sub: raw};
-}
-function inferAssetMainCategory(a){
-  const parsed = splitAssetCategory(a && a.category ? a.category : '');
-  if(parsed.main) return parsed.main;
-  const prefix = String(a && a.id ? a.id : '').split('-')[0].trim().toUpperCase();
-  if(prefix && ASSET_PREFIX_TO_MAIN[prefix]) return ASSET_PREFIX_TO_MAIN[prefix];
-  return '기타';
-}
-function inferAssetSubCategory(a){
-  const parsed = splitAssetCategory(a && a.category ? a.category : '');
-  return parsed.main ? (parsed.sub || '') : (parsed.sub || '');
-}
-function allAssetMainCategories(){
-  const set = new Set();
-  ASSET_MAIN_DEFAULTS.forEach(function(x){ set.add(x); });
-  assets.forEach(function(a){ set.add(inferAssetMainCategory(a)); });
-  return Array.from(set).filter(Boolean).sort();
-}
-function buildAssetMainCategoryOptions(selected){
-  const list = allAssetMainCategories();
-  let html = '';
-  for(let i=0; i<list.length; i++){
-    const v = list[i];
-    const sel = (String(v) === String(selected)) ? 'selected' : '';
-    html += '<option value="' + safe(v) + '" ' + sel + '>' + safe(v) + '</option>';
-  }
-  return html;
-}
-function rebuildAssetCategoryFilters(){
-  const mainSel = $('assetMainCat');
-  const subSel = $('assetSubCat');
-  if(!mainSel || !subSel) return;
-
-  const prevMain = mainSel.value || 'all';
-  const mains = Array.from(new Set(assets.map(function(a){ return inferAssetMainCategory(a); }))).filter(Boolean).sort();
-  let mainHtml = '<option value="all">모든 대분류</option>';
-  for(let i=0; i<mains.length; i++){
-    mainHtml += '<option value="' + safe(mains[i]) + '">' + safe(mains[i]) + '</option>';
-  }
-  mainSel.innerHTML = mainHtml;
-  mainSel.value = mains.includes(prevMain) ? prevMain : 'all';
-
-  rebuildAssetSubCategoryOptions();
-}
-function rebuildAssetSubCategoryOptions(){
-  const mainSel = $('assetMainCat');
-  const subSel = $('assetSubCat');
-  if(!mainSel || !subSel) return;
-
-  const prevSub = subSel.value || 'all';
-  const selectedMain = mainSel.value || 'all';
-  const candidates = assets.filter(function(a){
-    return selectedMain === 'all' ? true : inferAssetMainCategory(a) === selectedMain;
-  });
-  const subs = Array.from(new Set(candidates.map(function(a){ return inferAssetSubCategory(a); }).filter(Boolean))).sort();
-  let subHtml = '<option value="all">모든 세부분류</option>';
-  for(let i=0; i<subs.length; i++){
-    subHtml += '<option value="' + safe(subs[i]) + '">' + safe(subs[i]) + '</option>';
-  }
-  subSel.innerHTML = subHtml;
-  subSel.value = subs.includes(prevSub) ? prevSub : 'all';
-}
-// ===== /Asset big category helpers =====
-
-
 function assetFor(id){
   for(let i=0; i<assets.length; i++){
     if(assets[i].id === id) return assets[i];
@@ -213,7 +134,6 @@ async function loadData(){
     }
     
     $('connection').textContent = '공용 DB 연결됨';
-    rebuildAssetCategoryFilters();
     render();
   }catch(e){
     $('connection').textContent = 'DB 오류';
@@ -318,15 +238,11 @@ function renderDashboard(){
 function renderInventory(){
   const q = $('assetSearch').value.trim().toLowerCase();
   const f = $('assetFilter').value;
-  const main = $('assetMainCat') ? $('assetMainCat').value : 'all';
-  const sub = $('assetSubCat') ? $('assetSubCat').value : 'all';
   const list = assets.filter(function(a){
     const matchFilter = (f === 'all' ? true : statusFor(a) === f);
-    const matchMain = (main === 'all' ? true : inferAssetMainCategory(a) === main);
-    const matchSub = (sub === 'all' ? true : inferAssetSubCategory(a) === sub);
-    const textTarget = [a.id, a.name, a.category, inferAssetMainCategory(a), inferAssetSubCategory(a), a.location, a.note].join(' ').toLowerCase();
+    const textTarget = [a.id, a.name, a.category, a.location, a.note].join(' ').toLowerCase();
     const matchSearch = textTarget.includes(q);
-    return matchFilter && matchMain && matchSub && matchSearch;
+    return matchFilter && matchSearch;
   });
   
   if(list.length > 0){
@@ -514,11 +430,7 @@ function openModal(mode, id){
     
     parts.push('<div class="form-grid">');
     parts.push('<label class="field">식별번호 *<input name="id" required value="' + safe(aId) + '" ' + isReadonly + ' placeholder="EQ-001"></label>');
-    const parsedCat = splitAssetCategory(aCat);
-    const mainCat = parsedCat.main ? parsedCat.main : inferAssetMainCategory({id:aId, category:aCat});
-    const subCat = parsedCat.main ? (parsedCat.sub || '') : (aCat || '');
-    parts.push('<label class="field">대분류 *<select name="main_category" required>' + buildAssetMainCategoryOptions(mainCat) + '</select></label>');
-    parts.push('<label class="field">세부분류<input name="sub_category" value="' + safe(subCat) + '" placeholder="예: 측정공구, 전동공구"></label>');
+    parts.push('<label class="field">분류 *<input name="category" required value="' + safe(aCat) + '" placeholder="측정공구"></label>');
     parts.push('<label class="field full">비품명 *<input name="name" required value="' + safe(aName) + '"></label>');
     parts.push('<label class="field full">보관 위치<input name="location" value="' + safe(aLoc) + '" placeholder="분석실 캐비닛 A"></label>');
     parts.push('<label class="field">상태<select name="status"><option value="available" ' + selAvail + '>사용 가능</option><option value="maintenance" ' + selMaint + '>수리 중</option></select></label>');
@@ -709,13 +621,7 @@ async function saveForm(e){
     }
     if(modalMode === 'asset'){
       if(!isAdmin()) throw new Error('비품 등록·수정은 관리자 로그인이 필요합니다.');
-      let cat = (v.category||'').trim();
-      if(v.main_category !== undefined){
-        const m = (v.main_category||'').trim();
-        const s = (v.sub_category||'').trim();
-        cat = m + (s ? (' > ' + s) : '');
-      }
-      const payload={id:v.id.trim(),name:v.name.trim(),category:cat,location:(v.location||'').trim(),status:v.status||'available',note:(v.note||'').trim()};
+      const payload={id:v.id.trim(),name:v.name.trim(),category:v.category.trim(),location:(v.location||'').trim(),status:v.status||'available',note:(v.note||'').trim()};
       const result = modalId ? await db.from('assets').update(payload).eq('id',modalId) : await db.from('assets').insert(payload);
       if(result.error) throw result.error;
     } else if(modalMode === 'consumable'){
@@ -829,8 +735,6 @@ function bindEvents(){
   $('modalForm').addEventListener('submit',saveForm);
   $('modalBackdrop').addEventListener('click',function(e){if(e.target===$('modalBackdrop'))closeModal();});
   $('assetSearch').addEventListener('input',renderInventory);$('assetFilter').addEventListener('change',renderInventory);
-  if($('assetMainCat')) $('assetMainCat').addEventListener('change',function(){ rebuildAssetSubCategoryOptions(); renderInventory(); });
-  if($('assetSubCat')) $('assetSubCat').addEventListener('change',renderInventory);
   $('consumableSearch').addEventListener('input',renderConsumables);$('consumableFilter').addEventListener('change',renderConsumables);
   $('loanSearch').addEventListener('input',renderLoans);$('loanFilter').addEventListener('change',renderLoans);$('historySearch').addEventListener('input',renderHistory);
 }
