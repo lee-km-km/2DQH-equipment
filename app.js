@@ -981,7 +981,7 @@ function openModal(mode, id){
   else if(mode === 'return') btnText = '반납 완료';
   else if(mode === 'login') btnText = '로그인';
   else if(mode === 'editLoan') btnText = '수정 저장';
-  else if(mode === 'consumable') btnText = '소모품 저장';
+  else if(mode === 'consumable') btnText = isAdmin() ? '소모품 저장' : '수량 수정';
   else if(mode === 'reorder') btnText = '재주문 요청';
   else if(mode === 'movement') btnText = '수량 반영';
   else if(mode === 'quickReturn') btnText = '반납 완료';
