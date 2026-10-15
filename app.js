@@ -107,27 +107,25 @@ async function loadData(){
   try{
     const results = await Promise.all([
       db.from('assets').select('*').order('name'),
-      db.from('loans').select('*').order('borrowed_at', {ascending: false}),
-      db.rpc('get_asset_availability')
+      db.from('loans').select('*').order('borrowed_at', {ascending: false})
     ]);
     if(results[0].error) throw results[0].error;
     if(results[1].error) throw results[1].error;
-    if(results[2].error) throw results[2].error;
-    
+
     assets = results[0].data || [];
     loans = results[1].data || [];
-    const avList = results[2].data || [];
-    
+    // Compute availability from loan rows; a missing optional RPC must not block loading.
     borrowedAssetIds = new Set();
-    for(let i=0; i<avList.length; i++){
-      if(avList[i].is_borrowed) borrowedAssetIds.add(avList[i].asset_id);
+    for(let i=0; i<loans.length; i++){
+      if(!loans[i].returned_at) borrowedAssetIds.add(loans[i].asset_id);
     }
+    
     $('connection').textContent = '공용 DB 연결됨';
     render();
   }catch(e){
     $('connection').textContent = 'DB 오류';
-    console.error(e);
-    toast('데이터를 불러오지 못했습니다. Supabase 설정과 SQL 정책을 확인하세요.');
+    console.error('Supabase 데이터 로드 실패:', e);
+    toast('데이터를 불러오지 못했습니다: ' + (e && e.message ? e.message : 'Supabase 설정/RLS 확인'));
   }
 }
 
@@ -390,3 +388,91 @@ function openModal(mode, id){
   const hasAvail = assets.some(function(x){ return statusFor(x) === 'available'; });
   $('saveModal').disabled = (mode === 'borrow' && !hasAvail);
 }
+
+// ---- App bootstrap and event handlers (missing from the uploaded source) ----
+function nextAssetId(){
+  let max = 0;
+  assets.forEach(function(a){ const m = String(a.id || '').match(/^EQ-(\d+)$/i); if(m) max = Math.max(max, Number(m[1])); });
+  return 'EQ-' + String(max + 1).padStart(3, '0');
+}
+function showView(name){
+  document.querySelectorAll('.view').forEach(function(el){ el.classList.toggle('active', el.id === 'view-' + name); });
+  document.querySelectorAll('.nav[data-view]').forEach(function(el){ el.classList.toggle('active', el.dataset.view === name); });
+}
+function closeModal(){ $('modalBackdrop').classList.remove('open'); $('modalForm').reset(); }
+function formValues(form){ return Object.fromEntries(new FormData(form).entries()); }
+async function saveForm(e){
+  e.preventDefault();
+  if(!db){ toast('Supabase URL과 공개 키를 확인하세요.'); return; }
+  const form = $('modalForm'); if(!form.reportValidity()) return;
+  const v = formValues(form), btn = $('saveModal'); btn.disabled = true;
+  try{
+    if(modalMode === 'login'){
+      const {data,error} = await db.auth.signInWithPassword({email:v.email,password:v.password});
+      if(error) throw error;
+      session = data.session; await refreshAdminState();
+      if(!admin){ await db.auth.signOut(); session=null; await refreshAdminState(); throw new Error('이 계정에 관리자 권한이 없습니다. Supabase user_roles에 admin 역할을 등록하세요.'); }
+      closeModal(); toast('관리자 로그인 완료'); await loadData(); return;
+    }
+    if(modalMode === 'asset'){
+      if(!isAdmin()) throw new Error('비품 등록·수정은 관리자 로그인이 필요합니다.');
+      const payload={id:v.id.trim(),name:v.name.trim(),category:v.category.trim(),location:(v.location||'').trim(),status:v.status||'available',note:(v.note||'').trim()};
+      const result = modalId ? await db.from('assets').update(payload).eq('id',modalId) : await db.from('assets').insert(payload);
+      if(result.error) throw result.error;
+    } else if(modalMode === 'borrow'){
+      const {error}=await db.from('loans').insert({asset_id:v.asset_id,borrower_name:v.borrower_name.trim(),borrowed_at:v.borrowed_at,due_date:v.due_date,memo:(v.memo||'').trim()});
+      if(error) throw error;
+    } else if(modalMode === 'return'){
+      const target=loans.find(function(l){return String(l.id)===String(modalId);});
+      if(!target) throw new Error('대여 기록을 찾을 수 없습니다. 새로고침 후 다시 시도하세요.');
+      const memo=[target.memo||'',v.return_memo?'반납 메모: '+v.return_memo.trim():''].filter(Boolean).join('\n');
+      const {error}=await db.from('loans').update({returned_at:v.returned_at,memo:memo,updated_at:new Date().toISOString()}).eq('id',target.id);
+      if(error) throw error;
+    } else if(modalMode === 'editLoan'){
+      const {error}=await db.from('loans').update({borrower_name:v.borrower_name.trim(),due_date:v.due_date,memo:(v.memo||'').trim(),updated_at:new Date().toISOString()}).eq('id',modalId);
+      if(error) throw error;
+    } else throw new Error('알 수 없는 작업입니다.');
+    closeModal(); toast('저장했습니다.'); await loadData();
+  }catch(err){ console.error('저장/인증 실패:',err); toast(err&&err.message?err.message:'요청 처리에 실패했습니다.'); }
+  finally{ btn.disabled=false; }
+}
+function exportHistoryCsv(){
+  const headers=['비품 식별번호','비품명','대여자','대여 시작일','반납 예정일','실제 반납일','메모'];
+  const rows=loans.map(function(l){return [l.asset_id,fmtName(l.asset_id),l.borrower_name,l.borrowed_at,l.due_date,l.returned_at||'',l.memo||''];});
+  const cell=function(v){return '"'+String(v==null?'':v).replace(/"/g,'""')+'"';};
+  const csv='\ufeff'+[headers].concat(rows).map(function(r){return r.map(cell).join(',');}).join('\r\n');
+  const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8;'}));
+  const a=document.createElement('a');a.href=url;a.download='labstock-history-'+today()+'.csv';document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);
+}
+function bindEvents(){
+  document.querySelectorAll('.nav[data-view]').forEach(function(el){el.addEventListener('click',function(){showView(el.dataset.view);});});
+  document.addEventListener('click',function(e){
+    const target=e.target.closest('button');if(!target)return;
+    if(target.dataset.goto){showView(target.dataset.goto);return;}
+    if(target.dataset.borrow){openModal('borrow',target.dataset.borrow);return;}
+    if(target.dataset.edit){openModal('asset',target.dataset.edit);return;}
+    if(target.dataset.return){openModal('return',target.dataset.return);return;}
+    if(target.dataset.editLoan){openModal('editLoan',target.dataset.editLoan);return;}
+    switch(target.id){
+      case 'loginBtn':openModal('login');break;
+      case 'logoutBtn':db.auth.signOut().then(function(){session=null;admin=false;setAdminUI();toast('로그아웃했습니다.');loadData();}).catch(function(err){console.error(err);toast('로그아웃 실패: '+err.message);});break;
+      case 'addAsset':if(isAdmin())openModal('asset');else toast('관리자 로그인이 필요합니다.');break;
+      case 'loanAdd':case 'quickBorrow':openModal('borrow');break;
+      case 'closeModal':case 'cancelModal':closeModal();break;
+      case 'exportCsv':exportHistoryCsv();break;
+    }
+  });
+  $('modalForm').addEventListener('submit',saveForm);
+  $('modalBackdrop').addEventListener('click',function(e){if(e.target===$('modalBackdrop'))closeModal();});
+  $('assetSearch').addEventListener('input',renderInventory);$('assetFilter').addEventListener('change',renderInventory);
+  $('loanSearch').addEventListener('input',renderLoans);$('loanFilter').addEventListener('change',renderLoans);$('historySearch').addEventListener('input',renderHistory);
+}
+async function initApp(){
+  bindEvents();
+  if(!db){$('connection').textContent='Supabase 설정 필요';render();return;}
+  try{const {data,error}=await db.auth.getSession();if(error)throw error;session=data.session;await refreshAdminState();}
+  catch(err){console.warn('세션 확인 실패. 공개 데이터 조회는 계속 시도합니다.',err);}
+  await loadData();
+}
+document.addEventListener('DOMContentLoaded',initApp);
+
