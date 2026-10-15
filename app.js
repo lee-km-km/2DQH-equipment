@@ -576,17 +576,17 @@ function renderConsumables(){
 
 let actions = '';
 
-// 구매요청은 비로그인 사용자도 가능
+// 재주문 요청과 사용 기록은 비로그인 사용자도 가능
 actions += '<button class="text-btn" data-reorder="' +
   safe(c.id) + '">' +
   (isOut ? '구매 요청' : '재주문 요청') +
   '</button>';
 
-// 재고 변동 및 품목 수정은 관리자 전용
-if (isAdmin()) {
-  actions += '<button class="text-btn" data-movement="' +
-    safe(c.id) + '" data-movement-type="use">사용 기록</button>';
+actions += '<button class="text-btn" data-movement="' +
+  safe(c.id) + '" data-movement-type="use">사용 기록</button>';
 
+// 입고 및 품목 정보 수정은 관리자 전용
+if (isAdmin()) {
   actions += '<button class="text-btn" data-movement="' +
     safe(c.id) + '" data-movement-type="in">입고 기록</button>';
 
@@ -627,24 +627,16 @@ const rowClass = isOut
     rowsHost.innerHTML = '<div class="empty">등록된 소모품이 없습니다. 오른쪽 위에서 첫 소모품을 등록하세요.</div>';
   }
 
-  // 재주문 현황과 재고 변동 기록은 관리자 전용
+  // 재주문 상태 관리 영역은 관리자 전용
   document.querySelectorAll('.admin-consumables-only').forEach(function(el){
     el.classList.toggle('hidden', !isAdmin());
   });
 
   if(!isAdmin()){
     $('reorderRows').innerHTML = '';
-    $('movementRows').innerHTML = '';
-    return;
-  }
-
-  if(!consumablesAvailable){
+  } else if(!consumablesAvailable){
     $('reorderRows').innerHTML = '<div class="empty">소모품 데이터베이스 설정이 필요합니다.</div>';
-    $('movementRows').innerHTML = '<div class="empty">소모품 데이터베이스 설정이 필요합니다.</div>';
-    return;
-  }
-
-  if(!reorderRequests.length){
+  } else if(!reorderRequests.length){
     $('reorderRows').innerHTML = '<div class="empty">아직 재주문 요청이 없습니다.</div>';
   } else {
     let requestHtml = '';
@@ -681,7 +673,9 @@ const rowClass = isOut
       requestHtml + '</tbody></table>';
   }
 
-  if(!stockMovements.length){
+  if(!consumablesAvailable){
+    $('movementRows').innerHTML = '<div class="empty">소모품 데이터베이스 설정이 필요합니다.</div>';
+  } else if(!stockMovements.length){
     $('movementRows').innerHTML = '<div class="empty">아직 재고 변동 기록이 없습니다.</div>';
   } else {
     let movementHtml = '';
@@ -875,8 +869,8 @@ function openModal(mode, id){
     const c = consumableFor(id);
     const moveType = window.__labstockMovementType === 'in' ? 'in' : 'use';
 
-    if(!isAdmin()){
-      parts.push('<p>재고 변동 기록은 관리자 로그인이 필요합니다.</p>');
+    if(!isAdmin() && moveType !== 'use'){
+      parts.push('<p>입고 기록은 관리자 로그인이 필요합니다.</p>');
     } else if(!c){
       parts.push('<p>소모품을 찾을 수 없습니다.</p>');
     } else {
@@ -884,11 +878,22 @@ function openModal(mode, id){
         safe(c.quantity) + ' ' + safe(c.unit || '개') +
         '</b><br><span class="sub">' + safe(c.location || '위치 미등록') + '</span></p>');
 
-      parts.push('<div class="form-grid" style="margin-top:16px"><label class="field">기록 유형<select name="movement_type"><option value="use" ' +
-        (moveType === 'use' ? 'selected' : '') +
-        '>사용 / 재고 차감</option><option value="in" ' +
-        (moveType === 'in' ? 'selected' : '') +
-        '>입고 / 재고 증가</option></select></label><label class="field">수량 *<input name="quantity" type="number" min="0.01" step="any" required></label><label class="field full">기록자 *<input name="actor" required maxlength="100" placeholder="이름"></label><label class="field full">메모<textarea name="note" rows="2" maxlength="500" placeholder="사용 목적 또는 입고 정보"></textarea></label></div><p class="form-hint">저장 즉시 공용 재고 수량이 반영됩니다. 사용 기록으로 재고가 0 미만이 되지는 않습니다.</p>');
+      parts.push('<div class="form-grid" style="margin-top:16px">');
+      if(isAdmin()){
+        parts.push('<label class="field">기록 유형<select name="movement_type"><option value="use" ' +
+          (moveType === 'use' ? 'selected' : '') +
+          '>사용 / 재고 차감</option><option value="in" ' +
+          (moveType === 'in' ? 'selected' : '') +
+          '>입고 / 재고 증가</option></select></label>');
+      } else {
+        parts.push('<input type="hidden" name="movement_type" value="use">');
+        parts.push('<p class="field full">기록 유형: 사용 / 재고 차감</p>');
+      }
+      parts.push('<label class="field">수량 *<input name="quantity" type="number" min="0.01" step="any" max="' +
+        Math.max(0, Number(c.quantity)) + '" required></label>');
+      parts.push('<label class="field full">기록자 *<input name="actor" required maxlength="100" placeholder="이름"></label>');
+      parts.push('<label class="field full">메모<textarea name="note" rows="2" maxlength="500" placeholder="사용 목적 또는 입고 정보"></textarea></label>');
+      parts.push('</div><p class="form-hint">저장 즉시 공용 재고 수량이 반영됩니다. 사용 기록으로 재고가 0 미만이 되지는 않습니다.</p>');
     }
   } else if(mode === 'reorder'){
     const c = consumableFor(id);
@@ -1172,14 +1177,17 @@ async function saveForm(e){
 
       if(result.error) throw result.error;
     } else if(modalMode === 'movement'){
-      if(!isAdmin()) throw new Error('재고 변동 기록은 관리자 로그인이 필요합니다.');
+      const movementType = v.movement_type === 'in' ? 'in' : 'use';
+      if(movementType === 'in' && !isAdmin()){
+        throw new Error('입고 기록은 관리자 로그인이 필요합니다.');
+      }
 
       const c = consumableFor(modalId);
       if(!c) throw new Error('소모품을 찾을 수 없습니다.');
 
       const {error} = await db.rpc('record_consumable_movement', {
         p_consumable_id: c.id,
-        p_movement_type: v.movement_type,
+        p_movement_type: movementType,
         p_quantity: Number(v.quantity),
         p_actor: v.actor.trim(),
         p_note: (v.note || '').trim()
@@ -1187,8 +1195,6 @@ async function saveForm(e){
 
       if(error) throw error;
     } else if(modalMode === 'reorder' || modalMode === 'quickReorder'){
-      if(!isAdmin()) throw new Error('재주문 요청은 관리자 로그인이 필요합니다.');
-
       const c = modalMode === 'reorder'
         ? consumableFor(modalId)
         : consumableFor(v.consumable_id);
@@ -1389,20 +1395,17 @@ function bindEvents(){
     }
 
     if(target.dataset.reorder){
-      if(!isAdmin()){
-        toast('재주문 요청은 관리자 로그인이 필요합니다.');
-        return;
-      }
       openModal('reorder', target.dataset.reorder);
       return;
     }
 
     if(target.dataset.movement){
-      if(!isAdmin()){
-        toast('재고 변동 기록은 관리자 로그인이 필요합니다.');
+      const movementType = target.dataset.movementType || 'use';
+      if(movementType === 'in' && !isAdmin()){
+        toast('입고 기록은 관리자 로그인이 필요합니다.');
         return;
       }
-      window.__labstockMovementType = target.dataset.movementType || 'use';
+      window.__labstockMovementType = movementType;
       openModal('movement', target.dataset.movement);
       return;
     }
@@ -1460,10 +1463,6 @@ function bindEvents(){
         break;
 
       case 'homeReorder':
-        if(!isAdmin()){
-          toast('구매요청은 관리자 로그인이 필요합니다.');
-          break;
-        }
         window.__labstockFromHome = true;
         openModal('quickReorder');
         break;
