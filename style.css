@@ -192,3 +192,12 @@ td b{color:var(--ink);font-weight:600}
   body.home-active .mobile-bar{display:none}
   body.home-active main{padding-bottom:40px}
 }
+
+
+/* Compact top-level category controls. Borrow categories stay inside the modal content flow and scroll with the form. */
+.inventory-categories{padding:0 0 12px}
+.category-tabs{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:0 0 14px;min-width:0}
+.category-tab{flex:0 0 auto;border:1px solid var(--line);border-radius:999px;background:var(--bg);color:var(--muted);padding:7px 11px;font-size:12px;font-weight:600;line-height:1.25;white-space:nowrap}
+.category-tab:hover{background:var(--soft);color:var(--ink)}
+.category-tab.active{background:var(--accent);border-color:var(--accent);color:#fff}
+#modalBody .category-tabs{margin:0 0 16px}

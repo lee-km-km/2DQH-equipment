@@ -14,6 +14,8 @@ let consumablesAvailable = true;
 let session = null;
 let admin = false;
 let borrowedAssetIds = new Set();
+let selectedInventoryCategory = 'all';
+let selectedBorrowCategory = 'all';
 let modalMode = '';
 let modalId = null;
 
@@ -238,15 +240,38 @@ function renderDashboard(){
   $('recentActivity').innerHTML = recentHtml || '<div class="empty">아직 활동이 없습니다.</div>';
 }
 
+const TOP_LEVEL_CATEGORIES = ['공구','측정공구','실험장비','전기·전자','안전용품','기타'];
+function topLevelCategory(asset){
+  const raw = String((asset && asset.category) || '').trim();
+  const text = (raw + ' ' + String((asset && asset.name) || '')).toLowerCase();
+  if(/측정|캘리퍼|마이크로미터|게이지|버니어|멀티미터|테스터/.test(text)) return '측정공구';
+  if(/안전|보안경|장갑|마스크|소화기|구급|보호구/.test(text)) return '안전용품';
+  if(/전기|전자|전원|회로|납땜|인두|아두이노|센서|케이블/.test(text)) return '전기·전자';
+  if(/실험|피펫|비커|플라스크|시험관|원심|현미경|배양|시약/.test(text)) return '실험장비';
+  if(/공구|드라이버|렌치|펜치|플라이어|망치|톱|드릴|니퍼|스패너/.test(text)) return '공구';
+  if(TOP_LEVEL_CATEGORIES.includes(raw)) return raw;
+  return '기타';
+}
+function categoryTabsHtml(selected, actionAttr){
+  const cats = ['all'].concat(TOP_LEVEL_CATEGORIES);
+  return '<div class="category-tabs" aria-label="대분류">' + cats.map(function(cat){
+    const label = cat === 'all' ? '전체' : cat;
+    return '<button type="button" class="category-tab'+(selected===cat?' active':'')+'" '+actionAttr+'="'+safe(cat)+'" aria-pressed="'+(selected===cat?'true':'false')+'">'+label+'</button>';
+  }).join('') + '</div>';
+}
+
 function renderInventory(){
   const q = $('assetSearch').value.trim().toLowerCase();
   const f = $('assetFilter').value;
   const list = assets.filter(function(a){
+    const matchCategory = selectedInventoryCategory === 'all' || topLevelCategory(a) === selectedInventoryCategory;
     const matchFilter = (f === 'all' ? true : statusFor(a) === f);
     const textTarget = [a.id, a.name, a.category, a.location, a.note].join(' ').toLowerCase();
     const matchSearch = textTarget.includes(q);
-    return matchFilter && matchSearch;
+    return matchCategory && matchFilter && matchSearch;
   });
+  const categoryHost = $('inventoryCategories');
+  if(categoryHost) categoryHost.innerHTML = categoryTabsHtml(selectedInventoryCategory, 'data-inventory-category');
   
   if(list.length > 0){
     let listHtml = '';
@@ -269,6 +294,20 @@ function renderInventory(){
   } else {
     $('inventoryRows').innerHTML = '<div class="empty">검색 결과가 없습니다.</div>';
   }
+}
+
+function updateBorrowCategory(category){
+  selectedBorrowCategory = category;
+  const select = $('modalBody').querySelector('[name="asset_id"]');
+  if(!select) return;
+  const previous = select.value;
+  const available = assets.filter(function(a){ return statusFor(a) === 'available' && (category === 'all' || topLevelCategory(a) === category); });
+  select.innerHTML = available.map(function(a){ return '<option value="'+safe(a.id)+'">'+safe(a.id)+' · '+safe(a.name)+'</option>'; }).join('');
+  if(available.some(function(a){ return a.id === previous; })) select.value = previous;
+  const tabs = $('modalBody').querySelectorAll('[data-borrow-category]');
+  tabs.forEach(function(tab){ const active = tab.dataset.borrowCategory === category; tab.classList.toggle('active',active); tab.setAttribute('aria-pressed',active?'true':'false'); });
+  select.disabled = available.length === 0;
+  $('saveModal').disabled = available.length === 0;
 }
 
 function canManageLoan(l){ return true; }
@@ -405,7 +444,7 @@ function openModal(mode, id){
   if(mode === 'asset'){
     titleText = a ? '비품 정보 수정' : '비품 등록';
   } else if(mode === 'borrow'){
-    titleText = '대여 기록';
+    titleText = '대여';
   } else if(mode === 'return'){
     titleText = '반납 처리';
   } else if(mode === 'editLoan'){
@@ -459,12 +498,16 @@ function openModal(mode, id){
     parts.push('</div>');
   } else if(mode === 'borrow'){
     const avail = assets.filter(function(x){ return statusFor(x) === 'available'; });
+    selectedBorrowCategory = id ? topLevelCategory(assetFor(id)) : 'all';
+    if(!avail.some(function(x){ return topLevelCategory(x) === selectedBorrowCategory; })) selectedBorrowCategory = 'all';
+    const filteredAvail = avail.filter(function(x){ return selectedBorrowCategory === 'all' || topLevelCategory(x) === selectedBorrowCategory; });
     let optHtml = '';
-    for(let i=0; i<avail.length; i++){
-      const x = avail[i];
+    for(let i=0; i<filteredAvail.length; i++){
+      const x = filteredAvail[i];
       const isSel = (x.id === id) ? 'selected' : '';
       optHtml += '<option value="' + safe(x.id) + '" ' + isSel + '>' + safe(x.id) + ' · ' + safe(x.name) + '</option>';
     }
+    parts.push(categoryTabsHtml(selectedBorrowCategory, 'data-borrow-category'));
     parts.push('<div class="form-grid">');
     parts.push('<label class="field full">비품 *<select name="asset_id" required>' + optHtml + '</select></label>');
     parts.push('<label class="field full">대여자 이름 *<input name="borrower_name" required maxlength="100" placeholder="이름 직접 입력"></label>');
@@ -564,7 +607,7 @@ function openModal(mode, id){
   $('modalBody').innerHTML = parts.join('');
   
   let btnText = '저장';
-  if(mode === 'borrow') btnText = '대여 등록';
+  if(mode === 'borrow') btnText = '대여';
   else if(mode === 'return') btnText = '반납 완료';
   else if(mode === 'login') btnText = '로그인';
   else if(mode === 'editLoan') btnText = '수정 저장';
@@ -576,7 +619,7 @@ function openModal(mode, id){
   
   $('saveModal').textContent = btnText;
   const hasAvail = assets.some(function(x){ return statusFor(x) === 'available'; });
-  $('saveModal').disabled = (mode === 'borrow' && !hasAvail);
+  $('saveModal').disabled = (mode === 'borrow' && (!hasAvail || !assets.some(function(x){ return statusFor(x)==='available' && (selectedBorrowCategory==='all' || topLevelCategory(x)===selectedBorrowCategory); }))); 
   // Mobile friendliness: focus the most important field first.
   setTimeout(function(){
     if(mode === 'borrow'){
@@ -730,6 +773,8 @@ function bindEvents(){
   document.addEventListener('click',function(e){
     const target=e.target.closest('button');if(!target)return;
     if(target.dataset.goto){showView(target.dataset.goto);return;}
+    if(target.dataset.inventoryCategory){selectedInventoryCategory=target.dataset.inventoryCategory;renderInventory();return;}
+    if(target.dataset.borrowCategory){updateBorrowCategory(target.dataset.borrowCategory);return;}
     if(target.dataset.borrow){openModal('borrow',target.dataset.borrow);return;}
     if(target.dataset.edit){openModal('asset',target.dataset.edit);return;}
     if(target.dataset.return){openModal('return',target.dataset.return);return;}
