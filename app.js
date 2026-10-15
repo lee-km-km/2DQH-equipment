@@ -366,9 +366,9 @@ function renderConsumables(){
   });
   // Keep threshold-based inventory metrics and alerts private to administrators.
   $('consumableSummary').innerHTML = [
-    ['등록 품목', consumables.length, '등록된 소모품'],
-    ['재고 없음', outOfStock.length, '현재 수량이 0인 품목']
+    ['등록 품목', consumables.length, '등록된 소모품']
   ].concat(isAdmin() ? [
+    ['재고 없음', outOfStock.length, '현재 수량이 0인 품목'],
     ['최소 보유량 이하', low.length, '관리자 확인 및 재주문 필요'],
     ['재주문 요청', reorderRequests.filter(function(r){ return r.status !== 'received'; }).length, '처리 중인 요청']
   ] : []).map(function(x){return '<div class="metric"><div class="label">'+x[0]+'</div><div class="value">'+x[1]+'</div><div class="foot">'+x[2]+'</div></div>';}).join('');
@@ -500,16 +500,26 @@ function openModal(mode, id){
     const avail = assets.filter(function(x){ return statusFor(x) === 'available'; });
     selectedBorrowCategory = id ? topLevelCategory(assetFor(id)) : 'all';
     if(!avail.some(function(x){ return topLevelCategory(x) === selectedBorrowCategory; })) selectedBorrowCategory = 'all';
-    const filteredAvail = avail.filter(function(x){ return selectedBorrowCategory === 'all' || topLevelCategory(x) === selectedBorrowCategory; });
+    const filteredAvail = avail;
     let optHtml = '';
     for(let i=0; i<filteredAvail.length; i++){
       const x = filteredAvail[i];
       const isSel = (x.id === id) ? 'selected' : '';
       optHtml += '<option value="' + safe(x.id) + '" ' + isSel + '>' + safe(x.id) + ' · ' + safe(x.name) + '</option>';
     }
-    parts.push(categoryTabsHtml(selectedBorrowCategory, 'data-borrow-category'));
+    // 대분류는 별도 버튼 대신 비품 선택 목록 안의 그룹으로 표시합니다.
+    const groupedOptions = TOP_LEVEL_CATEGORIES.map(function(cat){
+      const items = filteredAvail.filter(function(x){ return topLevelCategory(x) === cat; });
+      if(!items.length) return '';
+      return '<optgroup label="'+safe(cat)+'">'+items.map(function(x){
+        return '<option value="'+safe(x.id)+'" '+(x.id === id ? 'selected' : '')+'>'+safe(x.id)+' · '+safe(x.name)+'</option>';
+      }).join('')+'</optgroup>';
+    }).join('');
+    const otherItems = filteredAvail.filter(function(x){ return !TOP_LEVEL_CATEGORIES.includes(topLevelCategory(x)); });
+    if(otherItems.length) optHtml = '<optgroup label="기타">'+otherItems.map(function(x){return '<option value="'+safe(x.id)+'" '+(x.id === id ? 'selected' : '')+'>'+safe(x.id)+' · '+safe(x.name)+'</option>';}).join('')+'</optgroup>';
+    else optHtml = '';
     parts.push('<div class="form-grid">');
-    parts.push('<label class="field full">비품 *<select name="asset_id" required>' + optHtml + '</select></label>');
+    parts.push('<label class="field full">비품 *<select name="asset_id" required>' + groupedOptions + optHtml + '</select></label>');
     parts.push('<label class="field full">대여자 이름 *<input name="borrower_name" required maxlength="100" placeholder="이름 직접 입력"></label>');
     parts.push('<label class="field">대여 시작일 *<input name="borrowed_at" type="date" required value="' + today() + '"></label>');
     parts.push('<label class="field">반납 예정일 *<input name="due_date" type="date" required min="' + today() + '" value="' + today() + '"></label>');
