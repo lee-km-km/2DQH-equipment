@@ -7,6 +7,9 @@ const $ = function(id){ return document.getElementById(id); };
 
 let assets = [];
 let loans = [];
+let consumables = [];
+let reorderRequests = [];
+let consumablesAvailable = true;
 let session = null;
 let admin = false;
 let borrowedAssetIds = new Set();
@@ -114,6 +117,13 @@ async function loadData(){
 
     assets = results[0].data || [];
     loans = results[1].data || [];
+    // Consumables are an optional module until the migration SQL is applied.
+    const cRes = await db.from('consumables').select('*').order('name');
+    const rRes = await db.from('reorder_requests').select('*, consumables(name, unit, location)').order('created_at', {ascending:false});
+    consumablesAvailable = !cRes.error && !rRes.error;
+    consumables = cRes.error ? [] : (cRes.data || []);
+    reorderRequests = rRes.error ? [] : (rRes.data || []);
+    if(cRes.error || rRes.error) console.warn('소모품 테이블을 사용할 수 없습니다. consumables_migration.sql을 적용했는지 확인하세요.', cRes.error || rRes.error);
     // Compute availability from loan rows; a missing optional RPC must not block loading.
     borrowedAssetIds = new Set();
     for(let i=0; i<loans.length; i++){
@@ -135,6 +145,7 @@ function render(){
   renderInventory();
   renderLoans();
   renderHistory();
+  renderConsumables();
   setAdminUI();
 }
 
@@ -148,7 +159,8 @@ function renderMetrics(){
     ['전체 비품', assets.length, '등록된 품목'],
     ['대여 중', active.length, '현재 사용 중'],
     ['사용 가능', assets.filter(function(a){ return statusFor(a) === 'available'; }).length, '바로 대여 가능'],
-    ['반납 기한 초과', overdue.length, '확인이 필요한 품목']
+    ['반납 기한 초과', overdue.length, '확인이 필요한 품목'],
+    ['소모품 부족', consumables.filter(function(c){ return Number(c.quantity) <= Number(c.min_quantity); }).length, '재주문 확인 필요']
   ];
   let html = '';
   for(let i=0; i<items.length; i++){
@@ -266,6 +278,50 @@ function renderLoans(){
   }
 }
 
+function renderConsumables(){
+  const searchEl = $('consumableSearch');
+  if(!searchEl) return;
+  const q = searchEl.value.trim().toLowerCase();
+  const f = $('consumableFilter').value;
+  const low = consumables.filter(function(c){ return Number(c.quantity) <= Number(c.min_quantity); });
+  const rows = consumables.filter(function(c){
+    const isLow = Number(c.quantity) <= Number(c.min_quantity);
+    const target = [c.name,c.category,c.location,c.note].join(' ').toLowerCase();
+    return target.includes(q) && (f === 'all' || (f === 'low' && isLow) || (f === 'ok' && !isLow));
+  });
+  $('consumableSummary').innerHTML = [
+    ['등록 품목', consumables.length, '공유 중인 소모품'],
+    ['재고 부족', low.length, '최소 보유량 이하'],
+    ['재주문 요청', reorderRequests.filter(function(r){ return r.status !== 'received'; }).length, '처리 중인 요청']
+  ].map(function(x){return '<div class="metric"><div class="label">'+x[0]+'</div><div class="value">'+x[1]+'</div><div class="foot">'+x[2]+'</div></div>';}).join('');
+  if(!consumablesAvailable){
+    $('consumableRows').innerHTML = '<div class="empty">소모품 기능을 시작하려면 프로젝트 ZIP에 포함된 <b>consumables_migration.sql</b>을 Supabase SQL Editor에서 실행하세요.</div>';
+  } else if(rows.length){
+    let html='';
+    rows.forEach(function(c){
+      const isLow=Number(c.quantity)<=Number(c.min_quantity);
+      const status=isLow?'<span class="status low">재주문 필요</span>':'<span class="status available">재고 충분</span>';
+      let actions='<button class="text-btn" data-reorder="'+safe(c.id)+'">재주문 요청</button>';
+      if(isAdmin()) actions+='<button class="text-btn" data-edit-consumable="'+safe(c.id)+'">수정</button>';
+      html+='<tr class="'+(isLow?'low-row':'')+'"><td><b>'+safe(c.name)+'</b><div class="asset-id">'+safe(c.category||'기타')+'</div></td><td><b>'+safe(c.quantity)+' '+safe(c.unit||'개')+'</b></td><td>'+safe(c.min_quantity)+' '+safe(c.unit||'개')+'</td><td><span class="location-text">'+safe(c.location||'위치 미등록')+'</span></td><td>'+status+'</td><td>'+actions+'</td></tr>';
+    });
+    $('consumableRows').innerHTML='<table><thead><tr><th>소모품 / 분류</th><th>현재 수량</th><th>최소 보유량</th><th>보관 위치</th><th>상태</th><th>작업</th></tr></thead><tbody>'+html+'</tbody></table>';
+  } else $('consumableRows').innerHTML='<div class="empty">등록된 소모품이 없습니다.'+(isAdmin()?' 오른쪽 위에서 첫 소모품을 등록하세요.':'')+'</div>';
+
+  if(!consumablesAvailable){ $('reorderRows').innerHTML='<div class="empty">소모품 데이터베이스 설정이 필요합니다.</div>'; return; }
+  if(!reorderRequests.length){ $('reorderRows').innerHTML='<div class="empty">아직 재주문 요청이 없습니다.</div>'; return; }
+  let requestHtml='';
+  reorderRequests.forEach(function(r){
+    const name=(r.consumables&&r.consumables.name)||consumableFor(r.consumable_id)?.name||'삭제된 품목';
+    const label=r.status==='received'?'입고 완료':r.status==='ordered'?'주문 진행 중':'요청됨';
+    let action='';
+    if(isAdmin() && r.status!=='received') action='<button class="text-btn" data-request-status="'+safe(r.id)+'" data-status="'+(r.status==='pending'?'ordered':'received')+'">'+(r.status==='pending'?'주문 진행':'입고 완료')+'</button>';
+    requestHtml+='<tr><td><b>'+safe(name)+'</b><div class="asset-id">'+safe(r.requester||'요청자 미입력')+' · '+dateText(String(r.created_at||'').slice(0,10))+'</div></td><td>'+safe(r.requested_quantity)+' '+safe((r.consumables&&r.consumables.unit)||'개')+'</td><td><span class="status '+(r.status==='received'?'available':r.status==='ordered'?'ordered':'pending')+'">'+label+'</span></td><td>'+safe(r.note||'—')+'</td><td>'+action+'</td></tr>';
+  });
+  $('reorderRows').innerHTML='<table><thead><tr><th>품목 / 요청자</th><th>요청 수량</th><th>진행 상태</th><th>메모</th><th>관리</th></tr></thead><tbody>'+requestHtml+'</tbody></table>';
+}
+function consumableFor(id){ return consumables.find(function(c){return String(c.id)===String(id);})||null; }
+
 function renderHistory(){
   const q = $('historySearch').value.trim().toLowerCase();
   const list = loans.filter(function(l){
@@ -302,6 +358,10 @@ function openModal(mode, id){
     titleText = '반납 처리';
   } else if(mode === 'editLoan'){
     titleText = '대여 기록 수정';
+  } else if(mode === 'consumable'){
+    titleText = id ? '소모품 정보 수정' : '소모품 등록';
+  } else if(mode === 'reorder'){
+    titleText = '재주문 요청';
   }
   $('modalTitle').textContent = titleText;
 
@@ -357,6 +417,30 @@ function openModal(mode, id){
     if(avail.length === 0){
       parts.push('<p>현재 대여 가능한 비품이 없습니다.</p>');
     }
+  } else if(mode === 'consumable'){
+    if(!isAdmin()) { parts.push('<p>소모품 등록 및 수정은 관리자 로그인이 필요합니다.</p>'); }
+    else {
+      const c=consumableFor(id);
+      parts.push('<div class="form-grid">');
+      parts.push('<label class="field full">소모품명 *<input name="name" required maxlength="160" value="'+safe(c?c.name:'')+'" placeholder="예: 200 µL 피펫 팁"></label>');
+      parts.push('<label class="field">분류<input name="category" value="'+safe(c?c.category:'')+'" placeholder="팁·장갑·시약"></label>');
+      parts.push('<label class="field">단위 *<input name="unit" required value="'+safe(c?c.unit:'개')+'" placeholder="박스, 병, 팩"></label>');
+      parts.push('<label class="field">현재 수량 *<input name="quantity" type="number" min="0" step="any" required value="'+safe(c?c.quantity:0)+'"></label>');
+      parts.push('<label class="field">최소 보유량 *<input name="min_quantity" type="number" min="0" step="any" required value="'+safe(c?c.min_quantity:1)+'"></label>');
+      parts.push('<label class="field full">보관 위치 *<input name="location" required maxlength="200" value="'+safe(c?c.location:'')+'" placeholder="예: 실험실 A · 2번 캐비닛 · 3번째 서랍"></label>');
+      parts.push('<label class="field full">비고<textarea name="note" rows="2" maxlength="500">'+safe(c?c.note:'')+'</textarea></label>');
+      parts.push('</div>');
+    }
+  } else if(mode === 'reorder'){
+    const c=consumableFor(id);
+    if(!c) parts.push('<p>소모품을 찾을 수 없습니다.</p>');
+    else {
+      parts.push('<p><b>'+safe(c.name)+'</b> · 현재 '+safe(c.quantity)+' '+safe(c.unit||'개')+' · '+safe(c.location||'위치 미등록')+'</p>');
+      parts.push('<div class="form-grid" style="margin-top:16px">');
+      parts.push('<label class="field">요청 수량 *<input name="requested_quantity" type="number" min="0.01" step="any" required value="'+Math.max(1,Number(c.min_quantity)-Number(c.quantity))+'"></label>');
+      parts.push('<label class="field">요청자 *<input name="requester" required maxlength="100" placeholder="이름"></label>');
+      parts.push('<label class="field full">메모<textarea name="note" rows="2" maxlength="500" placeholder="구매처, 제품번호 등 (선택)"></textarea></label></div>');
+    }
   } else if(mode === 'editLoan'){
     parts.push('<p><b>' + safe(assetObjName) + '</b> · ' + safe(lName) + '</p>');
     parts.push('<div class="form-grid">');
@@ -383,6 +467,8 @@ function openModal(mode, id){
   else if(mode === 'return') btnText = '반납 완료';
   else if(mode === 'login') btnText = '로그인';
   else if(mode === 'editLoan') btnText = '수정 저장';
+  else if(mode === 'consumable') btnText = '소모품 저장';
+  else if(mode === 'reorder') btnText = '재주문 요청';
   
   $('saveModal').textContent = btnText;
   const hasAvail = assets.some(function(x){ return statusFor(x) === 'available'; });
@@ -419,6 +505,15 @@ async function saveForm(e){
       const payload={id:v.id.trim(),name:v.name.trim(),category:v.category.trim(),location:(v.location||'').trim(),status:v.status||'available',note:(v.note||'').trim()};
       const result = modalId ? await db.from('assets').update(payload).eq('id',modalId) : await db.from('assets').insert(payload);
       if(result.error) throw result.error;
+    } else if(modalMode === 'consumable'){
+      if(!isAdmin()) throw new Error('소모품 등록·수정은 관리자 로그인이 필요합니다.');
+      const payload={name:v.name.trim(),category:(v.category||'기타').trim(),unit:v.unit.trim(),quantity:Number(v.quantity),min_quantity:Number(v.min_quantity),location:v.location.trim(),note:(v.note||'').trim(),updated_at:new Date().toISOString()};
+      const result=modalId?await db.from('consumables').update(payload).eq('id',modalId):await db.from('consumables').insert(payload);
+      if(result.error) throw result.error;
+    } else if(modalMode === 'reorder'){
+      const c=consumableFor(modalId); if(!c) throw new Error('소모품을 찾을 수 없습니다.');
+      const {error}=await db.from('reorder_requests').insert({consumable_id:c.id,requested_quantity:Number(v.requested_quantity),requester:v.requester.trim(),note:(v.note||'').trim(),status:'pending'});
+      if(error) throw error;
     } else if(modalMode === 'borrow'){
       // The loans INSERT RLS policy requires an authenticated user_id.
       // Reuse the current session, or create an anonymous auth session if needed.
@@ -476,10 +571,14 @@ function bindEvents(){
     if(target.dataset.edit){openModal('asset',target.dataset.edit);return;}
     if(target.dataset.return){openModal('return',target.dataset.return);return;}
     if(target.dataset.editLoan){openModal('editLoan',target.dataset.editLoan);return;}
+    if(target.dataset.editConsumable){openModal('consumable',target.dataset.editConsumable);return;}
+    if(target.dataset.reorder){openModal('reorder',target.dataset.reorder);return;}
+    if(target.dataset.requestStatus){updateRequestStatus(target.dataset.requestStatus,target.dataset.status);return;}
     switch(target.id){
       case 'loginBtn':openModal('login');break;
       case 'logoutBtn':db.auth.signOut().then(function(){session=null;admin=false;setAdminUI();toast('로그아웃했습니다.');loadData();}).catch(function(err){console.error(err);toast('로그아웃 실패: '+err.message);});break;
       case 'addAsset':if(isAdmin())openModal('asset');else toast('관리자 로그인이 필요합니다.');break;
+      case 'addConsumable':if(isAdmin())openModal('consumable');else toast('소모품 등록은 관리자 로그인이 필요합니다.');break;
       case 'loanAdd':case 'quickBorrow':openModal('borrow');break;
       case 'closeModal':case 'cancelModal':closeModal();break;
       case 'exportCsv':exportHistoryCsv();break;
@@ -488,7 +587,14 @@ function bindEvents(){
   $('modalForm').addEventListener('submit',saveForm);
   $('modalBackdrop').addEventListener('click',function(e){if(e.target===$('modalBackdrop'))closeModal();});
   $('assetSearch').addEventListener('input',renderInventory);$('assetFilter').addEventListener('change',renderInventory);
+  $('consumableSearch').addEventListener('input',renderConsumables);$('consumableFilter').addEventListener('change',renderConsumables);
   $('loanSearch').addEventListener('input',renderLoans);$('loanFilter').addEventListener('change',renderLoans);$('historySearch').addEventListener('input',renderHistory);
+}
+async function updateRequestStatus(id,status){
+  if(!isAdmin()){toast('관리자 로그인이 필요합니다.');return;}
+  const {error}=await db.from('reorder_requests').update({status:status,updated_at:new Date().toISOString()}).eq('id',id);
+  if(error){console.error(error);toast('요청 상태 변경 실패: '+error.message);return;}
+  toast(status==='received'?'입고 완료로 변경했습니다.':'주문 진행 중으로 변경했습니다.');await loadData();
 }
 async function initApp(){
   bindEvents();
