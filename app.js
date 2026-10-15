@@ -177,7 +177,11 @@ function renderDashboard(){
   const notice = $('lowStockNotice');
   if(notice){
     if(lowStockItems.length){
-      const preview = lowStockItems.slice(0,4).map(function(c){ return '<span class="low-stock-chip"><b>'+safe(c.name)+'</b><small>'+safe(c.quantity)+' '+safe(c.unit||'개')+' 남음 · '+safe(c.location||'위치 미등록')+'</small></span>'; }).join('');
+      const preview = lowStockItems.slice(0,4).map(function(c){
+        const out = Number(c.quantity) <= 0;
+        const label = out ? '재고 0 · 구매요청' : '구매요청';
+        return '<button class="low-stock-chip" type="button" data-reorder="'+safe(c.id)+'"><b>'+safe(c.name)+'</b><small>'+safe(c.quantity)+' '+safe(c.unit||'개')+' 남음 · '+safe(c.location||'위치 미등록')+' · '+label+'</small></button>';
+      }).join('');
       notice.innerHTML = '<section class="stock-alert"><div class="stock-alert-icon">!</div><div class="stock-alert-content"><b>소모품 재고 확인이 필요합니다</b><p>'+lowStockItems.length+'개 품목이 최소 보유량 이하입니다.</p><div class="low-stock-list">'+preview+'</div></div><button class="btn" data-goto="consumables">소모품 확인 →</button></section>';
     } else if(consumablesAvailable && consumables.length){ notice.innerHTML='<section class="stock-ok"><span>✓</span><div><b>소모품 재고 양호</b><p>현재 최소 보유량 이하인 품목이 없습니다.</p></div><button class="text-btn" data-goto="consumables">재고 보기 →</button></section>'; }
     else notice.innerHTML='';
@@ -313,9 +317,10 @@ function renderConsumables(){
     rows.forEach(function(c){
       const isLow=Number(c.quantity)<=Number(c.min_quantity);
       const status=isLow?'<span class="status low">재주문 필요</span>':'<span class="status available">재고 충분</span>';
-      let actions='<button class="text-btn" data-movement="'+safe(c.id)+'" data-movement-type="use">사용 기록</button><button class="text-btn" data-movement="'+safe(c.id)+'" data-movement-type="in">입고 기록</button><button class="text-btn" data-reorder="'+safe(c.id)+'">재주문 요청</button>';
+      let actions='<button class="text-btn" data-movement="'+safe(c.id)+'" data-movement-type="use">사용 기록</button><button class="text-btn" data-movement="'+safe(c.id)+'" data-movement-type="in">입고 기록</button><button class="text-btn" data-reorder="'+safe(c.id)+'">'+(Number(c.quantity)<=0?'구매 요청':'재주문 요청')+'</button>';
       if(isAdmin()) actions+='<button class="text-btn" data-edit-consumable="'+safe(c.id)+'">정보 수정</button>';
-      html+='<tr class="'+(isLow?'low-row':'')+'"><td><b>'+safe(c.name)+'</b><div class="asset-id">'+safe(c.category||'기타')+'</div></td><td><b>'+safe(c.quantity)+' '+safe(c.unit||'개')+'</b></td><td>'+safe(c.min_quantity)+' '+safe(c.unit||'개')+'</td><td><span class="location-text">'+safe(c.location||'위치 미등록')+'</span></td><td>'+status+'</td><td>'+actions+'</td></tr>';
+      const outOfStock = Number(c.quantity) <= 0;
+      html+='<tr class="'+(outOfStock?'out-of-stock':(isLow?'low-row':''))+'"><td><b>'+safe(c.name)+'</b><div class="asset-id">'+safe(c.category||'기타')+'</div></td><td><b>'+safe(c.quantity)+' '+safe(c.unit||'개')+'</b></td><td>'+safe(c.min_quantity)+' '+safe(c.unit||'개')+'</td><td><span class="location-text">'+safe(c.location||'위치 미등록')+'</span></td><td>'+status+'</td><td>'+actions+'</td></tr>';
     });
     $('consumableRows').innerHTML='<table><thead><tr><th>소모품 / 분류</th><th>현재 수량</th><th>최소 보유량</th><th>보관 위치</th><th>상태</th><th>작업</th></tr></thead><tbody>'+html+'</tbody></table>';
   } else $('consumableRows').innerHTML='<div class="empty">등록된 소모품이 없습니다.'+(isAdmin()?' 오른쪽 위에서 첫 소모품을 등록하세요.':'')+'</div>';
@@ -379,6 +384,10 @@ function openModal(mode, id){
     titleText = '재주문 요청';
   } else if(mode === 'movement'){
     titleText = id ? '재고 변동 기록' : '재고 변동 기록';
+  } else if(mode === 'quickReturn'){
+    titleText = '빠른 반납';
+  } else if(mode === 'quickReorder'){
+    titleText = '빠른 구매요청';
   }
   $('modalTitle').textContent = titleText;
 
@@ -463,6 +472,44 @@ function openModal(mode, id){
       parts.push('<label class="field">요청자 *<input name="requester" required maxlength="100" placeholder="이름"></label>');
       parts.push('<label class="field full">메모<textarea name="note" rows="2" maxlength="500" placeholder="구매처, 제품번호 등 (선택)"></textarea></label></div>');
     }
+
+  } else if(mode === 'quickReorder'){
+    const list = consumables.slice().sort(function(a,b){
+      const ao = Number(a.quantity) <= 0 ? 0 : (Number(a.quantity) <= Number(a.min_quantity) ? 1 : 2);
+      const bo = Number(b.quantity) <= 0 ? 0 : (Number(b.quantity) <= Number(b.min_quantity) ? 1 : 2);
+      if(ao !== bo) return ao - bo;
+      return String(a.name||'').localeCompare(String(b.name||''));
+    });
+    if(!list.length) parts.push('<p>등록된 소모품이 없습니다.</p>');
+    else {
+      const opt = list.map(function(c){
+        const tag = Number(c.quantity) <= 0 ? ' (재고 0)' : (Number(c.quantity) <= Number(c.min_quantity) ? ' (부족)' : '');
+        return '<option value="'+safe(c.id)+'">'+safe(c.name)+tag+'</option>';
+      }).join('');
+      const first = list[0];
+      const recQty = Math.max(1, Number(first.min_quantity) - Number(first.quantity));
+      parts.push('<div class="form-grid">');
+      parts.push('<label class="field full">소모품 *<select name="consumable_id" required>'+opt+'</select></label>');
+      parts.push('<label class="field">요청 수량 *<input name="requested_quantity" type="number" min="0.01" step="any" required value="'+recQty+'"></label>');
+      parts.push('<label class="field">요청자 *<input name="requester" required maxlength="100" placeholder="이름"></label>');
+      parts.push('<label class="field full">메모<textarea name="note" rows="2" maxlength="500" placeholder="구매처, 제품번호 등 (선택)"></textarea></label>');
+      parts.push('</div>');
+      parts.push('<p class="form-hint">재고가 0인 품목은 즉시 구매요청으로 연결됩니다. (대시보드 재고 알림도 그대로 유지됩니다.)</p>');
+    }
+  } else if(mode === 'quickReturn'){
+    const active = loans.filter(function(l){ return !l.returned_at; });
+    if(!active.length) parts.push('<p>현재 대여 중인 비품이 없습니다.</p>');
+    else{
+      const opt = active.map(function(l){
+        return '<option value="'+safe(l.id)+'">'+safe(l.asset_id)+' · '+safe(fmtName(l.asset_id))+' · '+safe(l.borrower_name||'')+'</option>';
+      }).join('');
+      parts.push('<div class="form-grid">');
+      parts.push('<label class="field full">반납할 비품 *<select name="loan_id" required>'+opt+'</select></label>');
+      parts.push('<label class="field">실제 반납일 *<input name="returned_at" type="date" required value="'+today()+'"></label>');
+      parts.push('<label class="field full">반납 메모<textarea name="return_memo" rows="2" maxlength="500" placeholder="파손·분실 여부 등"></textarea></label>');
+      parts.push('</div>');
+    }
+
   } else if(mode === 'editLoan'){
     parts.push('<p><b>' + safe(assetObjName) + '</b> · ' + safe(lName) + '</p>');
     parts.push('<div class="form-grid">');
@@ -492,11 +539,26 @@ function openModal(mode, id){
   else if(mode === 'consumable') btnText = '소모품 저장';
   else if(mode === 'reorder') btnText = '재주문 요청';
   else if(mode === 'movement') btnText = '재고 반영';
+  else if(mode === 'quickReturn') btnText = '반납 완료';
+  else if(mode === 'quickReorder') btnText = '구매요청';
   
   $('saveModal').textContent = btnText;
   const hasAvail = assets.some(function(x){ return statusFor(x) === 'available'; });
   $('saveModal').disabled = (mode === 'borrow' && !hasAvail);
+  // Mobile friendliness: focus the most important field first.
+  setTimeout(function(){
+    if(mode === 'borrow'){
+      const el = $('modalBody').querySelector('[name="borrower_name"]'); if(el) el.focus();
+    } else if(mode === 'reorder'){
+      const el = $('modalBody').querySelector('[name="requester"]'); if(el) el.focus();
+    } else if(mode === 'quickReorder'){
+      const el = $('modalBody').querySelector('[name="requester"]'); if(el) el.focus();
+    } else if(mode === 'quickReturn'){
+      const el = $('modalBody').querySelector('[name="loan_id"]'); if(el) el.focus();
+    }
+  }, 0);
 }
+
 
 // ---- App bootstrap and event handlers (missing from the uploaded source) ----
 function nextAssetId(){
@@ -508,6 +570,25 @@ function showView(name){
   document.querySelectorAll('.view').forEach(function(el){ el.classList.toggle('active', el.id === 'view-' + name); });
   document.querySelectorAll('.nav[data-view]').forEach(function(el){ el.classList.toggle('active', el.dataset.view === name); });
 }
+
+function scrollToReorderPanel(){
+  showView('consumables');
+  const el = document.getElementById('reorderPanel');
+  if(el) el.scrollIntoView({behavior:'smooth',block:'start'});
+}
+function firstOutOfStockConsumable(){
+  const out = consumables.filter(function(c){ return Number(c.quantity) <= 0; });
+  if(out.length) return out[0];
+  const low = consumables.filter(function(c){ return Number(c.quantity) <= Number(c.min_quantity); });
+  return low.length ? low[0] : null;
+}
+function openBestReorder(){
+  showView('consumables');
+  const c = firstOutOfStockConsumable();
+  if(c) openModal('reorder', c.id);
+  else openModal('quickReorder');
+}
+
 function closeModal(){ $('modalBackdrop').classList.remove('open'); $('modalForm').reset(); }
 function formValues(form){ return Object.fromEntries(new FormData(form).entries()); }
 async function saveForm(e){
@@ -535,11 +616,23 @@ async function saveForm(e){
       if(result.error) throw result.error;
     } else if(modalMode === 'movement'){
       const c=consumableFor(modalId); if(!c) throw new Error('소모품을 찾을 수 없습니다.');
+      const nextQty = (v.movement_type === 'in') ? (Number(c.quantity) + Number(v.quantity)) : (Number(c.quantity) - Number(v.quantity));
       const {data,error}=await db.rpc('record_consumable_movement',{p_consumable_id:c.id,p_movement_type:v.movement_type,p_quantity:Number(v.quantity),p_actor:v.actor.trim(),p_note:(v.note||'').trim()});
       if(error) throw error;
+      if(v.movement_type === 'use' && nextQty === 0){ window.__labstockAutoReorderId = c.id; }
     } else if(modalMode === 'reorder'){
       const c=consumableFor(modalId); if(!c) throw new Error('소모품을 찾을 수 없습니다.');
       const {error}=await db.from('reorder_requests').insert({consumable_id:c.id,requested_quantity:Number(v.requested_quantity),requester:v.requester.trim(),note:(v.note||'').trim(),status:'pending'});
+      if(error) throw error;
+    } else if(modalMode === 'quickReorder'){
+      const c=consumableFor(v.consumable_id); if(!c) throw new Error('소모품을 찾을 수 없습니다.');
+      const {error}=await db.from('reorder_requests').insert({consumable_id:c.id,requested_quantity:Number(v.requested_quantity),requester:v.requester.trim(),note:(v.note||'').trim(),status:'pending'});
+      if(error) throw error;
+    } else if(modalMode === 'quickReturn'){
+      const target=loans.find(function(l){return String(l.id)===String(v.loan_id);});
+      if(!target) throw new Error('대여 기록을 찾을 수 없습니다. 새로고침 후 다시 시도하세요.');
+      const memo=[target.memo||'',v.return_memo?'반납 메모: '+v.return_memo.trim():''].filter(Boolean).join('\n');
+      const {error}=await db.from('loans').update({returned_at:v.returned_at,memo:memo,updated_at:new Date().toISOString()}).eq('id',target.id);
       if(error) throw error;
     } else if(modalMode === 'borrow'){
       // The loans INSERT RLS policy requires an authenticated user_id.
@@ -578,6 +671,12 @@ async function saveForm(e){
       if(error) throw error;
     } else throw new Error('알 수 없는 작업입니다.');
     closeModal(); toast('저장했습니다.'); await loadData();
+    if(window.__labstockAutoReorderId){
+      const id = window.__labstockAutoReorderId; window.__labstockAutoReorderId = null;
+      toast('재고가 0이 되어 구매요청 화면으로 이동합니다.');
+      showView('consumables');
+      openModal('reorder', id);
+    }
   }catch(err){ console.error('저장/인증 실패:',err); toast(err&&err.message?err.message:'요청 처리에 실패했습니다.'); }
   finally{ btn.disabled=false; }
 }
@@ -608,6 +707,9 @@ function bindEvents(){
       case 'addAsset':if(isAdmin())openModal('asset');else toast('관리자 로그인이 필요합니다.');break;
       case 'addConsumable':if(isAdmin())openModal('consumable');else toast('소모품 등록은 관리자 로그인이 필요합니다.');break;
       case 'loanAdd':case 'quickBorrow':openModal('borrow');break;
+      case 'mobileBorrow':openModal('borrow');break;
+      case 'mobileReturn':showView('loans');openModal('quickReturn');break;
+      case 'mobileReorder':openBestReorder();break;
       case 'closeModal':case 'cancelModal':closeModal();break;
       case 'exportCsv':exportHistoryCsv();break;
     }
