@@ -420,7 +420,30 @@ async function saveForm(e){
       const result = modalId ? await db.from('assets').update(payload).eq('id',modalId) : await db.from('assets').insert(payload);
       if(result.error) throw result.error;
     } else if(modalMode === 'borrow'){
-      const {error}=await db.from('loans').insert({asset_id:v.asset_id,borrower_name:v.borrower_name.trim(),borrowed_at:v.borrowed_at,due_date:v.due_date,memo:(v.memo||'').trim()});
+      // The loans INSERT RLS policy requires an authenticated user_id.
+      // Reuse the current session, or create an anonymous auth session if needed.
+      const {data: sessionData, error: sessionError} = await db.auth.getSession();
+      if(sessionError) throw sessionError;
+      let currentSession = sessionData.session;
+
+      if(!currentSession || !currentSession.user || !currentSession.user.id){
+        const {data, error} = await db.auth.signInAnonymously();
+        if(error) throw error;
+        currentSession = data.session;
+      }
+      if(!currentSession || !currentSession.user || !currentSession.user.id){
+        throw new Error('로그인 세션을 생성하지 못했습니다. Supabase에서 익명 로그인을 활성화한 뒤 다시 시도하세요.');
+      }
+      session = currentSession;
+
+      const {error} = await db.from('loans').insert({
+        asset_id: v.asset_id,
+        borrower_name: v.borrower_name.trim(),
+        borrowed_at: v.borrowed_at,
+        due_date: v.due_date,
+        memo: (v.memo||'').trim(),
+        user_id: currentSession.user.id
+      });
       if(error) throw error;
     } else if(modalMode === 'return'){
       const target=loans.find(function(l){return String(l.id)===String(modalId);});
