@@ -16,6 +16,9 @@ let admin = false;
 let borrowedAssetIds = new Set();
 let modalMode = '';
 let modalId = null;
+let inventoryCategory = '전체';
+let borrowCategory = '전체';
+const ASSET_CATEGORIES = ['공구','측정공구','실험장비','전기·전자','안전용품','기타'];
 
 function today(){
   const d = new Date();
@@ -35,6 +38,44 @@ function safe(v){
   return String(v).replace(/[&<>"']/g, function(c){
     return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
   });
+}
+
+
+function categoryForAsset(a){
+  const raw = String((a && a.category) || '').trim().toLowerCase();
+  const name = String((a && a.name) || '').trim().toLowerCase();
+  const value = raw + ' ' + name;
+  if (/측정|캘리퍼|마이크로미터|멀티미터|테스터|온도계|압력계|게이지/.test(value)) return '측정공구';
+  if (/공구|드라이버|렌치|플라이어|펜치|망치|드릴|톱|커터/.test(value)) return '공구';
+  if (/전기|전자|전원|케이블|센서|회로|납땜|전압|전류/.test(value)) return '전기·전자';
+  if (/안전|보호구|보안경|장갑|마스크|안전화|하네스/.test(value)) return '안전용품';
+  if (/실험|장비|현미경|원심분리|교반|항온|건조기|분석기|인큐베이터/.test(value)) return '실험장비';
+  if (ASSET_CATEGORIES.includes(raw)) return raw;
+  return '기타';
+}
+function renderCategoryButtons(containerId, selected, dataAttr){
+  const el = $(containerId); if(!el) return;
+  const counts = {};
+  ASSET_CATEGORIES.forEach(function(c){counts[c]=0;});
+  assets.forEach(function(a){counts[categoryForAsset(a)]++;});
+  const allCount = assets.length;
+  let html = '<button type="button" class="category-chip '+(selected==='전체'?'active':'')+'" '+dataAttr+'="전체">전체 <span>'+allCount+'</span></button>';
+  ASSET_CATEGORIES.forEach(function(c){
+    html += '<button type="button" class="category-chip '+(selected===c?'active':'')+'" '+dataAttr+'="'+safe(c)+'">'+safe(c)+' <span>'+counts[c]+'</span></button>';
+  });
+  el.innerHTML = html;
+}
+function updateBorrowAssetOptions(){
+  const select = $('modalBody').querySelector('[name="asset_id"]');
+  if(!select) return;
+  const previous = select.value;
+  const avail = assets.filter(function(x){return statusFor(x)==='available' && (borrowCategory==='전체' || categoryForAsset(x)===borrowCategory);});
+  select.innerHTML = avail.map(function(x){return '<option value="'+safe(x.id)+'">'+safe(x.name)+' · '+safe(x.id)+' · '+safe(x.location||'위치 미등록')+'</option>';}).join('');
+  if(avail.some(function(x){return x.id===previous;})) select.value=previous;
+  select.disabled = avail.length===0;
+  const empty = $('modalBody').querySelector('[data-borrow-empty]');
+  if(empty) empty.textContent = avail.length ? '' : '이 대분류에는 지금 대여 가능한 비품이 없습니다.';
+  if($('saveModal') && modalMode==='borrow') $('saveModal').disabled = avail.length===0;
 }
 
 function assetFor(id){
@@ -162,8 +203,8 @@ function renderHome(){
   const active=loans.filter(function(l){ return !l.returned_at; }).length;
   loanEl.textContent=active+'건 대여 중';
   const low=consumables.filter(function(c){ return Number(c.quantity)<=Number(c.min_quantity); }).length;
-  lowEl.textContent=low?('재고 부족 '+low+'개'):'';
-  lowEl.classList.toggle('warn',low>0);
+  lowEl.textContent=isAdmin() && low?('최소 보유량 이하 '+low+'개'):'';
+  lowEl.classList.toggle('warn',isAdmin() && low>0);
 }
 
 function renderMetrics(){
@@ -239,13 +280,15 @@ function renderDashboard(){
 }
 
 function renderInventory(){
+  renderCategoryButtons('assetCategories', inventoryCategory, 'data-asset-category');
   const q = $('assetSearch').value.trim().toLowerCase();
   const f = $('assetFilter').value;
   const list = assets.filter(function(a){
     const matchFilter = (f === 'all' ? true : statusFor(a) === f);
     const textTarget = [a.id, a.name, a.category, a.location, a.note].join(' ').toLowerCase();
     const matchSearch = textTarget.includes(q);
-    return matchFilter && matchSearch;
+    const matchCategory = inventoryCategory === '전체' || categoryForAsset(a) === inventoryCategory;
+    return matchFilter && matchSearch && matchCategory;
   });
   
   if(list.length > 0){
@@ -312,44 +355,62 @@ function renderConsumables(){
   const searchEl = $('consumableSearch');
   if(!searchEl) return;
   const q = searchEl.value.trim().toLowerCase();
-  const f = $('consumableFilter').value;
+  const filterEl = $('consumableFilter');
+  if(!isAdmin() && (filterEl.value === 'low' || filterEl.value === 'ok')) filterEl.value = 'all';
+  const f = filterEl.value;
   const low = consumables.filter(function(c){ return Number(c.quantity) <= Number(c.min_quantity); });
+  const outOfStock = consumables.filter(function(c){ return Number(c.quantity) <= 0; });
   const rows = consumables.filter(function(c){
-    const isLow = Number(c.quantity) <= Number(c.min_quantity);
+    const quantity = Number(c.quantity);
+    const isLow = quantity <= Number(c.min_quantity);
+    const isOut = quantity <= 0;
     const target = [c.name,c.category,c.location,c.note].join(' ').toLowerCase();
-    return target.includes(q) && (f === 'all' || (f === 'low' && isLow) || (f === 'ok' && !isLow));
+    const filterMatch = f === 'all' || (f === 'available' && !isOut) || (f === 'out' && isOut) || (isAdmin() && f === 'low' && isLow) || (isAdmin() && f === 'ok' && !isLow);
+    return target.includes(q) && filterMatch;
   });
+  // Keep threshold-based inventory metrics and alerts private to administrators.
   $('consumableSummary').innerHTML = [
-    ['등록 품목', consumables.length, '공유 중인 소모품'],
-    ['재고 부족', low.length, '최소 보유량 이하'],
+    ['등록 품목', consumables.length, '등록된 소모품'],
+    ['재고 없음', outOfStock.length, '현재 수량이 0인 품목']
+  ].concat(isAdmin() ? [
+    ['최소 보유량 이하', low.length, '관리자 확인 및 재주문 필요'],
     ['재주문 요청', reorderRequests.filter(function(r){ return r.status !== 'received'; }).length, '처리 중인 요청']
-  ].map(function(x){return '<div class="metric"><div class="label">'+x[0]+'</div><div class="value">'+x[1]+'</div><div class="foot">'+x[2]+'</div></div>';}).join('');
+  ] : []).map(function(x){return '<div class="metric"><div class="label">'+x[0]+'</div><div class="value">'+x[1]+'</div><div class="foot">'+x[2]+'</div></div>';}).join('');
   if(!consumablesAvailable){
     $('consumableRows').innerHTML = '<div class="empty">소모품 기능을 시작하려면 프로젝트 ZIP에 포함된 <b>consumables_migration.sql</b>을 Supabase SQL Editor에서 실행하세요.</div>';
   } else if(rows.length){
     let html='';
     rows.forEach(function(c){
-      const isLow=Number(c.quantity)<=Number(c.min_quantity);
-      const status=isLow?'<span class="status low">재주문 필요</span>':'<span class="status available">재고 충분</span>';
-      let actions='<button class="text-btn" data-movement="'+safe(c.id)+'" data-movement-type="use">사용 기록</button><button class="text-btn" data-movement="'+safe(c.id)+'" data-movement-type="in">입고 기록</button><button class="text-btn" data-reorder="'+safe(c.id)+'">'+(Number(c.quantity)<=0?'구매 요청':'재주문 요청')+'</button>';
+      const quantity = Number(c.quantity);
+      const isLow = quantity <= Number(c.min_quantity);
+      const isOut = quantity <= 0;
+      const status = isOut ? '<span class="status low">재고 없음</span>' : (isAdmin() && isLow ? '<span class="status low">최소 보유량 이하</span>' : '<span class="status available">재고 있음</span>');
+      let actions='<button class="text-btn" data-movement="'+safe(c.id)+'" data-movement-type="use">사용 기록</button><button class="text-btn" data-movement="'+safe(c.id)+'" data-movement-type="in">입고 기록</button><button class="text-btn" data-reorder="'+safe(c.id)+'">'+(isOut?'구매 요청':'재주문 요청')+'</button>';
       if(isAdmin()) actions+='<button class="text-btn" data-edit-consumable="'+safe(c.id)+'">정보 수정</button>';
-      const outOfStock = Number(c.quantity) <= 0;
-      html+='<tr class="'+(outOfStock?'out-of-stock':(isLow?'low-row':''))+'"><td><b>'+safe(c.name)+'</b><div class="asset-id">'+safe(c.category||'기타')+'</div></td><td><b>'+safe(c.quantity)+' '+safe(c.unit||'개')+'</b></td><td>'+safe(c.min_quantity)+' '+safe(c.unit||'개')+'</td><td><span class="location-text">'+safe(c.location||'위치 미등록')+'</span></td><td>'+status+'</td><td>'+actions+'</td></tr>';
+      const rowClass = isOut ? 'out-of-stock' : (isAdmin() && isLow ? 'low-row' : '');
+      html+='<tr class="'+rowClass+'"><td><b>'+safe(c.name)+'</b><div class="asset-id">'+safe(c.category||'기타')+'</div></td><td><b>'+safe(c.quantity)+' '+safe(c.unit||'개')+'</b></td>'+(isAdmin()?'<td class="admin-only"><b>'+safe(c.min_quantity)+' '+safe(c.unit||'개')+'</b></td>':'')+'<td><span class="location-text">'+safe(c.location||'위치 미등록')+'</span></td><td>'+status+'</td><td>'+actions+'</td></tr>';
     });
-    $('consumableRows').innerHTML='<table><thead><tr><th>소모품 / 분류</th><th>현재 수량</th><th>최소 보유량</th><th>보관 위치</th><th>상태</th><th>작업</th></tr></thead><tbody>'+html+'</tbody></table>';
+    $('consumableRows').innerHTML='<table><thead><tr><th>소모품 / 분류</th><th>현재 수량</th>'+(isAdmin()?'<th class="admin-only">최소 보유량</th>':'')+'<th>보관 위치</th><th>상태</th><th>작업</th></tr></thead><tbody>'+html+'</tbody></table>';
   } else $('consumableRows').innerHTML='<div class="empty">등록된 소모품이 없습니다.'+(isAdmin()?' 오른쪽 위에서 첫 소모품을 등록하세요.':'')+'</div>';
 
+  // Reorder queue and stock movement log are management details; keep them in admin mode.
+  document.querySelectorAll('.admin-consumables-only').forEach(function(el){ el.classList.toggle('hidden', !isAdmin()); });
+  if(!isAdmin()){
+    $('reorderRows').innerHTML = '<div class="empty">재주문 요청 현황은 관리자 화면에서 확인할 수 있습니다.</div>';
+    $('movementRows').innerHTML = '<div class="empty">재고 변동 기록은 관리자 화면에서 확인할 수 있습니다.</div>';
+    return;
+  }
   if(!consumablesAvailable){ $('reorderRows').innerHTML='<div class="empty">소모품 데이터베이스 설정이 필요합니다.</div>'; return; }
   if(!reorderRequests.length){ $('reorderRows').innerHTML='<div class="empty">아직 재주문 요청이 없습니다.</div>'; } else {
-  let requestHtml='';
-  reorderRequests.forEach(function(r){
-    const name=(r.consumables&&r.consumables.name)||consumableFor(r.consumable_id)?.name||'삭제된 품목';
-    const label=r.status==='received'?'입고 완료':r.status==='ordered'?'주문 진행 중':'요청됨';
-    let action='';
-    if(isAdmin() && r.status!=='received') action='<button class="text-btn" data-request-status="'+safe(r.id)+'" data-status="'+(r.status==='pending'?'ordered':'received')+'">'+(r.status==='pending'?'주문 진행':'입고 완료')+'</button>';
-    requestHtml+='<tr><td><b>'+safe(name)+'</b><div class="asset-id">'+safe(r.requester||'요청자 미입력')+' · '+dateText(String(r.created_at||'').slice(0,10))+'</div></td><td>'+safe(r.requested_quantity)+' '+safe((r.consumables&&r.consumables.unit)||'개')+'</td><td><span class="status '+(r.status==='received'?'available':r.status==='ordered'?'ordered':'pending')+'">'+label+'</span></td><td>'+safe(r.note||'—')+'</td><td>'+action+'</td></tr>';
-  });
-  $('reorderRows').innerHTML='<table><thead><tr><th>품목 / 요청자</th><th>요청 수량</th><th>진행 상태</th><th>메모</th><th>관리</th></tr></thead><tbody>'+requestHtml+'</tbody></table>';
+    let requestHtml='';
+    reorderRequests.forEach(function(r){
+      const name=(r.consumables&&r.consumables.name)||consumableFor(r.consumable_id)?.name||'삭제된 품목';
+      const label=r.status==='received'?'입고 완료':r.status==='ordered'?'주문 진행 중':'요청됨';
+      let action='';
+      if(r.status!=='received') action='<button class="text-btn" data-request-status="'+safe(r.id)+'" data-status="'+(r.status==='pending'?'ordered':'received')+'">'+(r.status==='pending'?'주문 진행':'입고 완료')+'</button>';
+      requestHtml+='<tr><td><b>'+safe(name)+'</b><div class="asset-id">'+safe(r.requester||'요청자 미입력')+' · '+dateText(String(r.created_at||'').slice(0,10))+'</div></td><td>'+safe(r.requested_quantity)+' '+safe((r.consumables&&r.consumables.unit)||'개')+'</td><td><span class="status '+(r.status==='received'?'available':r.status==='ordered'?'ordered':'pending')+'">'+label+'</span></td><td>'+safe(r.note||'—')+'</td><td>'+action+'</td></tr>';
+    });
+    $('reorderRows').innerHTML='<table><thead><tr><th>품목 / 요청자</th><th>요청 수량</th><th>진행 상태</th><th>메모</th><th>관리</th></tr></thead><tbody>'+requestHtml+'</tbody></table>';
   }
   if(!stockMovements.length){ $('movementRows').innerHTML='<div class="empty">아직 재고 변동 기록이 없습니다.</div>'; }
   else { let movementHtml=''; stockMovements.forEach(function(m){ const isIn=m.movement_type==='in'; movementHtml+='<tr><td><b>'+safe((m.consumables&&m.consumables.name)||consumableFor(m.consumable_id)?.name||'소모품')+'</b><div class="asset-id">'+safe(m.actor||'사용자 미입력')+' · '+dateText(String(m.created_at||'').slice(0,10))+'</div></td><td><span class="status '+(isIn?'available':'borrowed')+'">'+(isIn?'입고':'사용')+'</span></td><td><b>'+(isIn?'+':'−')+safe(m.quantity)+' '+safe((m.consumables&&m.consumables.unit)||'개')+'</b></td><td>'+safe(m.note||'—')+'</td></tr>'; }); $('movementRows').innerHTML='<table><thead><tr><th>품목 / 기록자</th><th>유형</th><th>변동 수량</th><th>메모</th></tr></thead><tbody>'+movementHtml+'</tbody></table>'; }
@@ -387,7 +448,7 @@ function openModal(mode, id){
   if(mode === 'asset'){
     titleText = a ? '비품 정보 수정' : '비품 등록';
   } else if(mode === 'borrow'){
-    titleText = '대여 기록';
+    titleText = '대여';
   } else if(mode === 'return'){
     titleText = '반납 처리';
   } else if(mode === 'editLoan'){
@@ -440,15 +501,17 @@ function openModal(mode, id){
     parts.push('<label class="field">비고<input name="note" value="' + safe(aNote) + '"></label>');
     parts.push('</div>');
   } else if(mode === 'borrow'){
+    borrowCategory = '전체';
     const avail = assets.filter(function(x){ return statusFor(x) === 'available'; });
     let optHtml = '';
     for(let i=0; i<avail.length; i++){
       const x = avail[i];
       const isSel = (x.id === id) ? 'selected' : '';
-      optHtml += '<option value="' + safe(x.id) + '" ' + isSel + '>' + safe(x.id) + ' · ' + safe(x.name) + '</option>';
+      optHtml += '<option value="' + safe(x.id) + '" ' + isSel + '>' + safe(x.name) + ' · ' + safe(x.id) + ' · ' + safe(x.location||'위치 미등록') + '</option>';
     }
+    parts.push('<div class="borrow-category-wrap"><div class="field-label">비품 대분류를 선택하세요</div><div id="borrowCategories" class="category-chips"></div></div>');
     parts.push('<div class="form-grid">');
-    parts.push('<label class="field full">비품 *<select name="asset_id" required>' + optHtml + '</select></label>');
+    parts.push('<label class="field full">비품 *<select name="asset_id" required>' + optHtml + '</select><small data-borrow-empty></small></label>');
     parts.push('<label class="field full">대여자 이름 *<input name="borrower_name" required maxlength="100" placeholder="이름 직접 입력"></label>');
     parts.push('<label class="field">대여 시작일 *<input name="borrowed_at" type="date" required value="' + today() + '"></label>');
     parts.push('<label class="field">반납 예정일 *<input name="due_date" type="date" required min="' + today() + '" value="' + today() + '"></label>');
@@ -544,9 +607,10 @@ function openModal(mode, id){
   }
   
   $('modalBody').innerHTML = parts.join('');
+  if(mode === 'borrow'){ renderCategoryButtons('borrowCategories', borrowCategory, 'data-borrow-category'); updateBorrowAssetOptions(); }
   
   let btnText = '저장';
-  if(mode === 'borrow') btnText = '대여 등록';
+  if(mode === 'borrow') btnText = '대여';
   else if(mode === 'return') btnText = '반납 완료';
   else if(mode === 'login') btnText = '로그인';
   else if(mode === 'editLoan') btnText = '수정 저장';
@@ -712,6 +776,8 @@ function bindEvents(){
   document.addEventListener('click',function(e){
     const target=e.target.closest('button');if(!target)return;
     if(target.dataset.goto){showView(target.dataset.goto);return;}
+    if(target.dataset.assetCategory){inventoryCategory=target.dataset.assetCategory;renderInventory();return;}
+    if(target.dataset.borrowCategory){borrowCategory=target.dataset.borrowCategory;renderCategoryButtons('borrowCategories',borrowCategory,'data-borrow-category');updateBorrowAssetOptions();return;}
     if(target.dataset.borrow){openModal('borrow',target.dataset.borrow);return;}
     if(target.dataset.edit){openModal('asset',target.dataset.edit);return;}
     if(target.dataset.return){openModal('return',target.dataset.return);return;}
@@ -726,6 +792,7 @@ function bindEvents(){
       case 'addAsset':if(isAdmin())openModal('asset');else toast('관리자 로그인이 필요합니다.');break;
       case 'addConsumable':if(isAdmin())openModal('consumable');else toast('소모품 등록은 관리자 로그인이 필요합니다.');break;
       case 'loanAdd':case 'quickBorrow':openModal('borrow');break;
+      case 'assetCategories':break;
       case 'homeBorrow':window.__labstockFromHome=true;openModal('borrow');break;
       case 'homeReturn':window.__labstockFromHome=true;openModal('quickReturn');break;
       case 'homeReorder':window.__labstockFromHome=true;openModal('quickReorder');break;
