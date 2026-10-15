@@ -620,23 +620,20 @@ const rowClass = isOut
     rowsHost.innerHTML = '<div class="empty">등록된 소모품이 없습니다. 오른쪽 위에서 첫 소모품을 등록하세요.</div>';
   }
 
-  // 재주문 현황과 재고 변동 기록은 관리자 전용
+  // 주문 상태 변경은 관리자 전용이며, 재고 변동 내역은 모든 사용자가 확인할 수 있음
   document.querySelectorAll('.admin-consumables-only').forEach(function(el){
     el.classList.toggle('hidden', !isAdmin());
   });
 
-  if(!isAdmin()){
-    $('reorderRows').innerHTML = '';
-    $('movementRows').innerHTML = '';
-    return;
-  }
-
   if(!consumablesAvailable){
-    $('reorderRows').innerHTML = '<div class="empty">소모품 데이터베이스 설정이 필요합니다.</div>';
+    $('reorderRows').innerHTML = isAdmin()
+      ? '<div class="empty">소모품 데이터베이스 설정이 필요합니다.</div>'
+      : '';
     $('movementRows').innerHTML = '<div class="empty">소모품 데이터베이스 설정이 필요합니다.</div>';
     return;
   }
 
+  if(isAdmin()){
   if(!reorderRequests.length){
     $('reorderRows').innerHTML = '<div class="empty">아직 재주문 요청이 없습니다.</div>';
   } else {
@@ -672,6 +669,9 @@ const rowClass = isOut
 
     $('reorderRows').innerHTML = '<table><thead><tr><th>품목 / 요청자</th><th>요청 수량</th><th>진행 상태</th><th>메모</th><th>관리</th></tr></thead><tbody>' +
       requestHtml + '</tbody></table>';
+  }
+  } else {
+    $('reorderRows').innerHTML = '';
   }
 
   if(!stockMovements.length){
