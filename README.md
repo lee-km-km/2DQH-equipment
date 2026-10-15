@@ -62,6 +62,11 @@ Webhook은 서버에서 Edge Function을 호출하므로 Resend API 키가 브�
 ## 모바일 QR 홈 화면
 휴대폰 화면(폭 700px 이하)으로 접속하면 먼저 **대여 / 반납 / 구매요청** 큰 버튼 3개만 보이는 홈이 열립니다. 저장하거나 닫으면 홈으로 돌아오고, 상단 메뉴의 `홈`으로도 돌아올 수 있습니다. PC 화면은 기존 대시보드 그대로입니다. 비품실 QR에는 배포된 Vercel 주소를 그대로 넣으면 됩니다.
 
+## 디자인 메모
+- 단색 배경 + 포인트 색 하나(`--accent`), 카드 대신 표와 구분선 중심의 플랫한 스타일입니다. 색은 `style.css` 맨 위 변수에서 바꿉니다.
+- 글꼴은 Pretendard(CDN)를 쓰며, 불러오지 못하면 시스템 글꼴로 대체됩니다.
+- 휴대폰에서는 입력 창이 화면 아래에서 올라오는 시트로 열립니다.
+
 ## E. GitHub/Vercel 배포
 1. ZIP을 풀고 `index.html`, `style.css`, `app.js`, `supabase.sql`, `consumables_migration.sql`, `README.md`, `supabase/` 폴더를 저장소 루트에 업로드/교체합니다.
 2. Vercel Project Settings → General → Root Directory가 이 파일들이 있는 폴더를 가리키는지 확인합니다.

@@ -193,8 +193,8 @@ function renderDashboard(){
         const label = out ? '재고 0 · 구매요청' : '구매요청';
         return '<button class="low-stock-chip" type="button" data-reorder="'+safe(c.id)+'"><b>'+safe(c.name)+'</b><small>'+safe(c.quantity)+' '+safe(c.unit||'개')+' 남음 · '+safe(c.location||'위치 미등록')+' · '+label+'</small></button>';
       }).join('');
-      notice.innerHTML = '<section class="stock-alert"><div class="stock-alert-icon">!</div><div class="stock-alert-content"><b>소모품 재고 확인이 필요합니다</b><p>'+lowStockItems.length+'개 품목이 최소 보유량 이하입니다.</p><div class="low-stock-list">'+preview+'</div></div><button class="btn" data-goto="consumables">소모품 확인 →</button></section>';
-    } else if(consumablesAvailable && consumables.length){ notice.innerHTML='<section class="stock-ok"><span>✓</span><div><b>소모품 재고 양호</b><p>현재 최소 보유량 이하인 품목이 없습니다.</p></div><button class="text-btn" data-goto="consumables">재고 보기 →</button></section>'; }
+      notice.innerHTML = '<section class="stock-alert"><div class="stock-alert-icon">!</div><div class="stock-alert-content"><b>소모품 재고 확인이 필요합니다</b><p>'+lowStockItems.length+'개 품목이 최소 보유량 이하입니다.</p><div class="low-stock-list">'+preview+'</div></div><button class="btn" data-goto="consumables">소모품 확인</button></section>';
+    } else if(consumablesAvailable && consumables.length){ notice.innerHTML='<section class="stock-ok"><span>✓</span><div><b>소모품 재고 양호</b><p>현재 최소 보유량 이하인 품목이 없습니다.</p></div><button class="text-btn" data-goto="consumables">재고 보기</button></section>'; }
     else notice.innerHTML='';
   }
   const active = loans.filter(function(l){ return !l.returned_at; }).sort(function(a,b){
