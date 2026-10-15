@@ -18,6 +18,7 @@ let modalMode = '';
 let modalId = null;
 let inventoryCategory = '전체';
 let borrowCategory = '전체';
+let borrowSelectedAsset = '';
 const ASSET_CATEGORIES = ['공구','측정공구','실험장비','전기·전자','안전용품','기타'];
 
 function today(){
@@ -66,13 +67,14 @@ function renderCategoryButtons(containerId, selected, dataAttr){
   el.innerHTML = html;
 }
 function updateBorrowAssetOptions(){
-  const select = $('modalBody').querySelector('[name="asset_id"]');
-  if(!select) return;
-  const previous = select.value;
+  const list = $('modalBody').querySelector('#borrowAssetOptions');
+  if(!list) return;
   const avail = assets.filter(function(x){return statusFor(x)==='available' && (borrowCategory==='전체' || categoryForAsset(x)===borrowCategory);});
-  select.innerHTML = avail.map(function(x){return '<option value="'+safe(x.id)+'">'+safe(x.name)+' · '+safe(x.id)+' · '+safe(x.location||'위치 미등록')+'</option>';}).join('');
-  if(avail.some(function(x){return x.id===previous;})) select.value=previous;
-  select.disabled = avail.length===0;
+  if(!avail.some(function(x){return String(x.id)===String(borrowSelectedAsset);})) borrowSelectedAsset = avail.length ? avail[0].id : '';
+  list.innerHTML = avail.map(function(x){
+    const checked = String(x.id)===String(borrowSelectedAsset) ? 'checked' : '';
+    return '<label class="borrow-asset-option '+(checked?'selected':'')+'"><input type="radio" name="asset_id" value="'+safe(x.id)+'" '+checked+' required><span class="borrow-asset-name">'+safe(x.name)+'</span><span class="borrow-asset-meta">'+safe(x.id)+' · '+safe(x.location||'위치 미등록')+'</span></label>';
+  }).join('');
   const empty = $('modalBody').querySelector('[data-borrow-empty]');
   if(empty) empty.textContent = avail.length ? '' : '이 대분류에는 지금 대여 가능한 비품이 없습니다.';
   if($('saveModal') && modalMode==='borrow') $('saveModal').disabled = avail.length===0;
@@ -502,16 +504,9 @@ function openModal(mode, id){
     parts.push('</div>');
   } else if(mode === 'borrow'){
     borrowCategory = '전체';
-    const avail = assets.filter(function(x){ return statusFor(x) === 'available'; });
-    let optHtml = '';
-    for(let i=0; i<avail.length; i++){
-      const x = avail[i];
-      const isSel = (x.id === id) ? 'selected' : '';
-      optHtml += '<option value="' + safe(x.id) + '" ' + isSel + '>' + safe(x.name) + ' · ' + safe(x.id) + ' · ' + safe(x.location||'위치 미등록') + '</option>';
-    }
-    parts.push('<div class="borrow-category-wrap"><div class="field-label">비품 대분류를 선택하세요</div><div id="borrowCategories" class="category-chips"></div></div>');
+    borrowSelectedAsset = id || '';
+    parts.push('<div class="borrow-picker-scroll" aria-label="대여할 비품 선택"><div class="borrow-category-wrap"><div id="borrowCategories" class="category-chips" aria-label="비품 대분류 선택"></div></div><div id="borrowAssetOptions" class="borrow-asset-options" role="group" aria-label="대여 가능한 비품"></div><small data-borrow-empty></small></div>');
     parts.push('<div class="form-grid">');
-    parts.push('<label class="field full">비품 *<select name="asset_id" required>' + optHtml + '</select><small data-borrow-empty></small></label>');
     parts.push('<label class="field full">대여자 이름 *<input name="borrower_name" required maxlength="100" placeholder="이름 직접 입력"></label>');
     parts.push('<label class="field">대여 시작일 *<input name="borrowed_at" type="date" required value="' + today() + '"></label>');
     parts.push('<label class="field">반납 예정일 *<input name="due_date" type="date" required min="' + today() + '" value="' + today() + '"></label>');
@@ -773,6 +768,12 @@ function exportHistoryCsv(){
 }
 function bindEvents(){
   document.querySelectorAll('.nav[data-view]').forEach(function(el){el.addEventListener('click',function(){showView(el.dataset.view);});});
+  document.addEventListener('change',function(e){
+    if(e.target && e.target.matches('#borrowAssetOptions input[name="asset_id"]')){
+      borrowSelectedAsset=e.target.value;
+      document.querySelectorAll('#borrowAssetOptions .borrow-asset-option').forEach(function(el){el.classList.toggle('selected',!!el.querySelector('input:checked'));});
+    }
+  });
   document.addEventListener('click',function(e){
     const target=e.target.closest('button');if(!target)return;
     if(target.dataset.goto){showView(target.dataset.goto);return;}
