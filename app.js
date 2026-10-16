@@ -917,9 +917,8 @@ function openModal(mode, id){
       parts.push('<label class="field full">메모<textarea name="note" rows="2" maxlength="500" placeholder="구매처, 제품번호 등 (선택)"></textarea></label></div>');
     }
   } else if(mode === 'quickReorder'){
-    if(!isAdmin()){
-      parts.push('<p>구매요청은 관리자 로그인이 필요합니다.</p>');
-    } else {
+    // 구매요청은 비로그인 사용자도 가능
+    {
       const list = consumables.slice().sort(function(a,b){
         const ao = Number(a.quantity) <= 0 ? 0 : (Number(a.quantity) <= Number(a.min_quantity) ? 1 : 2);
         const bo = Number(b.quantity) <= 0 ? 0 : (Number(b.quantity) <= Number(b.min_quantity) ? 1 : 2);
@@ -1079,11 +1078,6 @@ function firstOutOfStockConsumable(){
 }
 
 function openBestReorder(){
-  if(!isAdmin()){
-    toast('구매요청은 관리자 로그인이 필요합니다.');
-    return;
-  }
-
   showView('consumables');
 
   const c = firstOutOfStockConsumable();
