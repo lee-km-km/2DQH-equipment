@@ -440,8 +440,13 @@ function updateBorrowCategory(category){
   $('saveModal').disabled = available.length === 0;
 }
 
+function isMyLoan(l){
+  return !!(l && l.user_id && session && session.user && l.user_id === session.user.id);
+}
+
+// 관리자 또는 해당 대여를 등록한 본인(같은 브라우저 세션)만 반납/수정 가능
 function canManageLoan(l){
-  return true;
+  return isAdmin() || isMyLoan(l);
 }
 
 function renderLoans(){
@@ -843,7 +848,7 @@ function openModal(mode, id){
     parts.push('<label class="field full">대여자 이름 *<input name="borrower_name" required maxlength="100" placeholder="이름 직접 입력"></label>');
     parts.push('<label class="field">대여 시작일 *<input name="borrowed_at" type="date" required value="' + today() + '"></label>');
     parts.push('<label class="field">반납 예정일 *<input name="due_date" type="date" required min="' + today() + '" value="' + today() + '"></label>');
-    parts.push('<label class="field full">사용 목적 / 메모<textarea name="memo" rows="2" maxlength="500" placeholder="선택 입력"></textarea><small>대여 기록은 공용 목록에 저장됩니다. 이름 입력은 본인 확인 수단이 아닙니다.</small></label>');
+    parts.push('<label class="field full">사용 목적 / 메모<textarea name="memo" rows="2" maxlength="500" placeholder="선택 입력"></textarea><small>대여 기록은 공용 목록에 저장되며, 반납·수정은 대여한 본인(이 기기/브라우저)만 할 수 있습니다.</small></label>');
     parts.push('</div>');
 
     if(avail.length === 0){
@@ -948,11 +953,11 @@ function openModal(mode, id){
     }
   } else if(mode === 'quickReturn'){
     const active = loans.filter(function(l){
-      return !l.returned_at;
+      return !l.returned_at && canManageLoan(l);
     });
 
     if(!active.length){
-      parts.push('<p>현재 대여 중인 비품이 없습니다.</p>');
+      parts.push('<p>' + (isAdmin() ? '현재 대여 중인 비품이 없습니다.' : '이 기기에서 대여한 반납 대기 비품이 없습니다.') + '</p>');
     } else {
       const opt = active.map(function(l){
         return '<option value="' + safe(l.id) + '">' +
@@ -1216,6 +1221,7 @@ async function saveForm(e){
       });
 
       if(!target) throw new Error('대여 기록을 찾을 수 없습니다. 새로고침 후 다시 시도하세요.');
+      if(!canManageLoan(target)) throw new Error('본인이 대여한 기록만 반납 처리할 수 있습니다.');
 
       const memo = [
         target.memo || '',
@@ -1263,6 +1269,7 @@ async function saveForm(e){
       });
 
       if(!target) throw new Error('대여 기록을 찾을 수 없습니다. 새로고침 후 다시 시도하세요.');
+      if(!canManageLoan(target)) throw new Error('본인이 대여한 기록만 반납 처리할 수 있습니다.');
 
       const memo = [
         target.memo || '',
@@ -1277,6 +1284,9 @@ async function saveForm(e){
 
       if(error) throw error;
     } else if(modalMode === 'editLoan'){
+      const own = loans.find(function(l){ return String(l.id) === String(modalId); });
+      if(!canManageLoan(own)) throw new Error('본인이 대여한 기록만 수정할 수 있습니다.');
+
       const {error} = await db.from('loans').update({
         borrower_name: v.borrower_name.trim(),
         due_date: v.due_date,
@@ -1368,8 +1378,9 @@ function bindEvents(){
     }
 
     if(target.dataset.return){
-      if(!isAdmin()){
-        toast('반납 처리는 관리자 로그인이 필요합니다.');
+      const ln = loans.find(function(x){ return String(x.id) === String(target.dataset.return); });
+      if(!canManageLoan(ln)){
+        toast('본인이 대여한 기록만 반납 처리할 수 있습니다.');
         return;
       }
       openModal('return', target.dataset.return);
@@ -1377,8 +1388,9 @@ function bindEvents(){
     }
 
     if(target.dataset.editLoan){
-      if(!isAdmin()){
-        toast('대여 기록 수정은 관리자 로그인이 필요합니다.');
+      const ln = loans.find(function(x){ return String(x.id) === String(target.dataset.editLoan); });
+      if(!canManageLoan(ln)){
+        toast('본인이 대여한 기록만 수정할 수 있습니다.');
         return;
       }
       openModal('editLoan', target.dataset.editLoan);
@@ -1454,10 +1466,6 @@ function bindEvents(){
         break;
 
       case 'homeReturn':
-        if(!isAdmin()){
-          toast('반납 처리는 관리자 로그인이 필요합니다.');
-          break;
-        }
         window.__labstockFromHome = true;
         openModal('quickReturn');
         break;
@@ -1472,10 +1480,6 @@ function bindEvents(){
         break;
 
       case 'mobileReturn':
-        if(!isAdmin()){
-          toast('반납 처리는 관리자 로그인이 필요합니다.');
-          break;
-        }
         showView('loans');
         openModal('quickReturn');
         break;

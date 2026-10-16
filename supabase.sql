@@ -119,11 +119,11 @@ create policy loans_insert_public
 on public.loans for insert to anon, authenticated
 with check (true);
 
--- [수정] 누구나(anon, authenticated) 대여 기록 수정 및 반납 처리를 할 수 있도록 개방
-create policy loans_update_public
+-- [수정] 대여 기록 수정/반납은 등록한 본인(user_id = auth.uid()) 또는 관리자만 가능
+create policy loans_update_owner_or_admin
 on public.loans for update to anon, authenticated
-using (true)
-with check (true);
+using (user_id = (select auth.uid()) or (select public.is_admin()))
+with check (user_id = (select auth.uid()) or (select public.is_admin()));
 
 create policy loans_delete_admin_only
 on public.loans for delete to authenticated
